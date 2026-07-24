@@ -111,6 +111,7 @@
       <li class="reveal" style="animation-delay:.32s"><a href="https://poke-team-builder-kohl.vercel.app" target="_blank" rel="noopener noreferrer">ポケモン最強パーティ構築ツール</a></li>
       <li class="reveal" style="animation-delay:.38s"><a href="https://antirust-skillet-granular.ngrok-free.dev" target="_blank" rel="noopener noreferrer">扶養管理アプリ</a></li>
       <li class="reveal" id="onanikki-item" style="animation-delay:.44s"><span>おなにっき</span></li>
+      <li class="reveal" id="futari-kitchen-item" style="animation-delay:.5s"><span>ふたりキッチン</span></li>
     </ul>
   </section>
 </main>
@@ -130,21 +131,32 @@
     })();
   }
 
-  // おなにっきのリンクは status.json から毎回最新のトンネルURLを取得する
+  // 起動のたびにURLが変わるアプリは status.json から毎回最新のトンネルURLを取得する
+  const LIVE_LINKS = [
+    { itemId: "onanikki-item", key: "onanikkiUrl", label: "おなにっき" },
+    { itemId: "futari-kitchen-item", key: "futariKitchenUrl", label: "ふたりキッチン" },
+  ];
+
+  function showOffline(itemId, label) {
+    document.getElementById(itemId).innerHTML = `<span class="offline">${label}</span>`;
+  }
+
   fetch("./status.json?t=" + Date.now())
     .then(r => r.json())
-    .then(({ onanikkiUrl }) => {
-      const item = document.getElementById("onanikki-item");
-      if (!onanikkiUrl) { item.innerHTML = '<span class="offline">おなにっき</span>'; return; }
-      const a = document.createElement("a");
-      a.href = onanikkiUrl;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.textContent = "おなにっき";
-      item.replaceChildren(a);
+    .then(status => {
+      for (const { itemId, key, label } of LIVE_LINKS) {
+        const url = status[key];
+        if (!url) { showOffline(itemId, label); continue; }
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = label;
+        document.getElementById(itemId).replaceChildren(a);
+      }
     })
     .catch(() => {
-      document.getElementById("onanikki-item").innerHTML = '<span class="offline">おなにっき</span>';
+      LIVE_LINKS.forEach(({ itemId, label }) => showOffline(itemId, label));
     });
 </script>
 
