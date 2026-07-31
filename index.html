@@ -142,23 +142,36 @@
     document.getElementById(itemId).innerHTML = `<span class="offline">${label}</span>`;
   }
 
-  fetch("./status.json?t=" + Date.now())
-    .then(r => r.json())
-    .then(status => {
-      for (const { itemId, key, label } of LIVE_LINKS) {
-        const url = status[key];
-        if (!url) { showOffline(itemId, label); continue; }
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        a.textContent = label;
-        document.getElementById(itemId).replaceChildren(a);
-      }
-    })
-    .catch(() => {
-      LIVE_LINKS.forEach(({ itemId, label }) => showOffline(itemId, label));
-    });
+  function refreshLiveLinks() {
+    fetch("./status.json?t=" + Date.now())
+      .then(r => r.json())
+      .then(status => {
+        for (const { itemId, key, label } of LIVE_LINKS) {
+          const url = status[key];
+          const item = document.getElementById(itemId);
+          if (!url) { showOffline(itemId, label); continue; }
+          const existing = item.querySelector("a");
+          if (existing && existing.href === url) continue; // 変化なし
+          const a = document.createElement("a");
+          a.href = url;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = label;
+          item.replaceChildren(a);
+        }
+      })
+      .catch(() => {
+        LIVE_LINKS.forEach(({ itemId, label }) => showOffline(itemId, label));
+      });
+  }
+
+  // タブを開いたままでも最新のURLに追従させる:
+  // 定期ポーリングに加え、タブに戻ってきた瞬間にも再取得する
+  refreshLiveLinks();
+  setInterval(refreshLiveLinks, 20_000);
+  addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshLiveLinks();
+  });
 </script>
 
 </body>
