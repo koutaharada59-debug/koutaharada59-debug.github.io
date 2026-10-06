@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="light">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>集合 暗記ボード</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎯</text></svg>">
@@ -10,7 +11,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   /* 配色はチームみらい アクションボードに準拠 */
-  :root, :root[data-theme="light"] {
+  :root {
+    color-scheme: light;
     --bg: #f6f4ef; --card: #fff; --fg: #0a0a0a; --sub: #4b5563; --muted: #737373;
     --line: #e5e5e5; --frame: #0a0a0a; --track: #e5e7eb; --chip: #f3f4f6;
     --primary: #2ba68f; --primary-hover: #26957f; --on-primary: #fafafa;
@@ -19,26 +21,6 @@
     --hero: linear-gradient(90deg, #64d8c6, #bcecd3);
     --level: linear-gradient(90deg, #30baa7, #47c991);
     --shadow: 0 1px 3px rgba(0,0,0,.1), 0 1px 2px -1px rgba(0,0,0,.1);
-  }
-  :root[data-theme="dark"] {
-    --bg: #101413; --card: #1b2120; --fg: #f2f2f2; --sub: #b8bfbd; --muted: #8b9391;
-    --line: #2d3533; --frame: #4b5553; --track: #2d3533; --chip: #262d2c;
-    --primary: #3cc4aa; --primary-hover: #34b39b; --on-primary: #08201b;
-    --yellow: #facc15; --ok: #4ade80; --ng: #f87171;
-    --explain-bg: #12302b; --explain-fg: #99f6e4;
-    --hero: linear-gradient(90deg, #1f5c53, #24493a);
-    --shadow: 0 1px 3px rgba(0,0,0,.5);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #101413; --card: #1b2120; --fg: #f2f2f2; --sub: #b8bfbd; --muted: #8b9391;
-      --line: #2d3533; --frame: #4b5553; --track: #2d3533; --chip: #262d2c;
-      --primary: #3cc4aa; --primary-hover: #34b39b; --on-primary: #08201b;
-      --yellow: #facc15; --ok: #4ade80; --ng: #f87171;
-      --explain-bg: #12302b; --explain-fg: #99f6e4;
-      --hero: linear-gradient(90deg, #1f5c53, #24493a);
-      --shadow: 0 1px 3px rgba(0,0,0,.5);
-    }
   }
 
   * { box-sizing: border-box; }
