@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>集合 暗記ボード</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎯</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* 配色はチームみらい アクションボードに準拠 */
+  :root, :root[data-theme="light"] {
+    --bg: #f6f4ef; --card: #fff; --fg: #0a0a0a; --sub: #4b5563; --muted: #737373;
+    --line: #e5e5e5; --frame: #0a0a0a; --track: #e5e7eb; --chip: #f3f4f6;
+    --primary: #2ba68f; --primary-hover: #26957f; --on-primary: #fafafa;
+    --yellow: #fde047; --ok: #15803d; --ng: #dc2626;
+    --explain-bg: #f0fdfa; --explain-fg: #0f766e;
+    --hero: linear-gradient(90deg, #64d8c6, #bcecd3);
+    --level: linear-gradient(90deg, #30baa7, #47c991);
+    --shadow: 0 1px 3px rgba(0,0,0,.1), 0 1px 2px -1px rgba(0,0,0,.1);
+  }
+  :root[data-theme="dark"] {
+    --bg: #101413; --card: #1b2120; --fg: #f2f2f2; --sub: #b8bfbd; --muted: #8b9391;
+    --line: #2d3533; --frame: #4b5553; --track: #2d3533; --chip: #262d2c;
+    --primary: #3cc4aa; --primary-hover: #34b39b; --on-primary: #08201b;
+    --yellow: #facc15; --ok: #4ade80; --ng: #f87171;
+    --explain-bg: #12302b; --explain-fg: #99f6e4;
+    --hero: linear-gradient(90deg, #1f5c53, #24493a);
+    --shadow: 0 1px 3px rgba(0,0,0,.5);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101413; --card: #1b2120; --fg: #f2f2f2; --sub: #b8bfbd; --muted: #8b9391;
+      --line: #2d3533; --frame: #4b5553; --track: #2d3533; --chip: #262d2c;
+      --primary: #3cc4aa; --primary-hover: #34b39b; --on-primary: #08201b;
+      --yellow: #facc15; --ok: #4ade80; --ng: #f87171;
+      --explain-bg: #12302b; --explain-fg: #99f6e4;
+      --hero: linear-gradient(90deg, #1f5c53, #24493a);
+      --shadow: 0 1px 3px rgba(0,0,0,.5);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100vh; background: var(--bg); color: var(--fg);
+    font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Cambria Math", "STIX Two Math", sans-serif;
+    -webkit-tap-highlight-color: transparent; overflow-x: hidden;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; }
+  a { color: inherit; }
+  .math { white-space: pre-line; }
+
+  /* ---------- navbar ---------- */
+  .nav { position: sticky; top: 16px; z-index: 30; display: flex; justify-content: center; height: 64px; }
+  .nav-inner {
+    width: 100%; margin: 0 16px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between;
+    background: var(--card); border-bottom: 1px solid var(--line); border-radius: 16px; font-size: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; text-decoration: none; }
+  .brand-mark { width: 32px; height: 32px; border-radius: 50%; background: var(--level); display: grid; place-items: center; color: #fff; font-size: 17px; }
+  .nav-links { display: flex; align-items: center; gap: 16px; font-weight: 700; }
+  .nav-links a { text-decoration: none; }
+  .lv-pill { background: var(--chip); border-radius: 99px; padding: 4px 10px; font-size: 13px; }
+
+  /* ---------- hero / profile ---------- */
+  .hero { margin-top: -96px; padding-top: 96px; background: var(--hero); }
+  .profile-wrap { display: flex; justify-content: center; padding: 24px 16px; }
+  .profile { width: 100%; max-width: 512px; background: var(--card); border-radius: 6px; padding: 24px; }
+  .profile-row { display: flex; align-items: center; }
+  .avatar { width: 64px; height: 64px; border-radius: 50%; background: var(--level); color: #fff; display: grid; place-items: center; font-size: 28px; font-weight: 700; flex-shrink: 0; }
+  .profile-info { margin-left: 24px; min-width: 0; }
+  .p-name { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .p-name button { border: 0; background: none; color: var(--muted); font-size: 12px; padding: 2px 4px; }
+  .p-lv { display: flex; align-items: baseline; margin-top: 8px; gap: 16px; }
+  .p-lv b { font-size: 14px; }
+  .p-lv strong { font-size: 22px; margin-left: 4px; line-height: 1; }
+  .p-lv span { font-size: 14px; }
+  .p-xp { margin-top: 8px; font-size: 14px; color: var(--sub); }
+  .next { display: flex; font-size: 14px; margin: 16px 0 8px; }
+  .next b { font-weight: 700; }
+  .track { width: 100%; height: 12px; border-radius: 99px; background: var(--track); box-shadow: inset 0 2px 4px rgba(0,0,0,.05); overflow: hidden; }
+  .fill { height: 100%; border-radius: 99px; background: var(--level); transition: width 1s cubic-bezier(.22,1,.36,1); }
+
+  /* ---------- metrics ---------- */
+  .metrics { max-width: 512px; margin: 0 auto; padding: 24px 16px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .metric { background: var(--card); border: 1px solid var(--frame); border-radius: 12px; box-shadow: var(--shadow); padding: 16px; text-align: center; }
+  .metric small { display: block; font-size: 12px; color: var(--sub); font-weight: 500; }
+  .metric strong { display: block; font-size: 28px; font-weight: 700; color: var(--primary); margin-top: 4px; }
+  .metric strong span { font-size: 14px; color: var(--muted); font-weight: 500; }
+
+  /* ---------- sections ---------- */
+  .page-title { text-align: center; font-size: 24px; font-weight: 500; margin: 56px 0 8px; }
+  .cat { margin-top: 36px; }
+  .cat h3 { font-size: 20px; font-weight: 700; margin: 0; padding: 0 16px; max-width: 1400px; margin-inline: auto; }
+  .cat h3 small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 8px; }
+  .hscroll-wrap { position: relative; max-width: 1400px; margin: 0 auto; }
+  .hscroll { overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
+  .hscroll::-webkit-scrollbar { display: none; }
+  .hscroll-row { display: flex; width: max-content; gap: 16px; padding: 16px 16px 8px; }
+  .hscroll-row > * { width: 300px; flex-shrink: 0; scroll-snap-align: start; }
+  .arrow {
+    position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 40px; height: 40px; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--card); box-shadow: var(--shadow); display: none; font-size: 18px;
+  }
+  .arrow.l { left: 4px; } .arrow.r { right: 4px; }
+  @media (hover: hover) and (min-width: 768px) { .arrow.show { display: grid; place-items: center; } }
+
+  /* ---------- mission card ---------- */
+  .card { background: var(--card); color: var(--fg); border: 1px solid var(--frame); border-radius: 12px; box-shadow: var(--shadow); }
+  .m-card { display: flex; flex-direction: column; height: 100%; }
+  .m-head { display: flex; align-items: center; gap: 16px; padding: 24px 24px 16px; }
+  .m-icon-col { display: flex; flex-direction: column; align-items: center; }
+  .m-icon {
+    width: 80px; height: 80px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--chip); font-size: 34px; font-weight: 700; color: var(--primary);
+  }
+  .m-icon.feat { background: #fef9c3; }
+  .status {
+    margin-top: -12px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600;
+    border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 2px 8px; white-space: nowrap;
+  }
+  .status.done { background: #0a0a0a; color: #fff; border-color: #0a0a0a; }
+  .m-title { font-size: 18px; font-weight: 700; line-height: 1.3; margin: 0 0 6px; }
+  .m-sub { font-size: 13px; color: var(--sub); font-weight: 500; }
+  .m-foot { padding: 0 24px 24px; display: flex; flex-direction: column; gap: 24px; margin-top: auto; }
+  .m-meta { display: flex; flex-direction: column; gap: 6px; }
+  .m-meta .row { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--sub); }
+  .badge { display: inline-flex; align-items: center; gap: 4px; border-radius: 6px; padding: 2px 10px; font-size: 14px; font-weight: 500; background: var(--chip); color: var(--sub); }
+  .badge.feat { background: rgba(253,224,71,.9); color: #000; }
+  .badge.outline { background: transparent; border: 1px solid #9ca3af; }
+  .cta {
+    display: block; text-align: center; text-decoration: none; box-sizing: border-box;
+    width: 100%; border: 0; border-radius: 99px; padding: 15px; font-size: 16px; font-weight: 700;
+    background: var(--primary); color: #fff; transition: transform .12s, background .2s;
+  }
+  .cta:hover { background: var(--primary-hover); }
+  .cta:active { transform: scale(.95); }
+  .cta.again { background: var(--yellow); color: #000; }
+
+  /* ---------- activities ---------- */
+  .acts { max-width: 512px; margin: 0 auto; padding: 0 16px; }
+  .act-list { padding: 8px 20px; }
+  .act { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  .act:first-child { border-top: 0; }
+  .act .dot { width: 36px; height: 36px; border-radius: 50%; background: var(--level); color: #fff; display: grid; place-items: center; font-weight: 700; flex-shrink: 0; }
+  .act time { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .empty { text-align: center; color: var(--muted); font-size: 14px; padding: 20px; }
+
+  /* ---------- detail ---------- */
+  .detail { max-width: 672px; margin: 0 auto; padding: 24px 16px 64px; display: flex; flex-direction: column; gap: 16px; }
+  .crumb { font-size: 14px; color: var(--sub); display: flex; gap: 6px; flex-wrap: wrap; }
+  .crumb a { text-decoration: none; }
+  .crumb a:hover { text-decoration: underline; }
+  .pad { padding: 24px; }
+  .d-head { display: flex; gap: 16px; align-items: flex-start; }
+  .d-head .m-icon { width: 64px; height: 64px; font-size: 28px; flex-shrink: 0; }
+  .d-title { font-size: 20px; font-weight: 700; margin: 0 0 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .d-body { margin-top: 20px; color: var(--sub); line-height: 1.75; font-size: 15px; }
+  .h-card { font-size: 18px; font-weight: 700; margin: 0; }
+  .note { font-size: 14px; color: var(--muted); margin: 12px 0 0; }
+  .study-item { border-top: 1px solid var(--line); padding: 12px 0; }
+  .study-item:first-of-type { margin-top: 12px; }
+  .study-q { display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left; border: 0; background: none; padding: 0; font-size: 14px; font-weight: 500; line-height: 1.6; }
+  .study-q .tg { flex-shrink: 0; font-size: 11px; font-weight: 700; border-radius: 4px; padding: 1px 6px; margin-top: 2px; color: #fff; }
+  .study-q .chev { margin-left: auto; color: var(--muted); transition: transform .2s; }
+  .study-item.open .chev { transform: rotate(180deg); }
+  .study-a { display: none; margin: 10px 0 0; background: var(--explain-bg); color: var(--explain-fg); border-radius: 8px; padding: 12px 14px; font-size: 14px; line-height: 1.75; }
+  .study-item.open .study-a { display: block; }
+
+  .q-title { font-weight: 700; margin: 0 0 24px; line-height: 1.6; }
+  .opts { display: flex; flex-direction: column; gap: 12px; }
+  .opt { display: flex; gap: 12px; align-items: flex-start; font-size: 14px; line-height: 1.6; cursor: pointer; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; transition: border-color .15s, background .15s; }
+  .opt:hover { border-color: var(--muted); }
+  .opt input { margin: 4px 0 0; width: 16px; height: 16px; accent-color: var(--primary); flex-shrink: 0; }
+  .opt.sel { border-color: var(--primary); background: var(--explain-bg); }
+  .opt.res { cursor: default; }
+  .opt.res:hover { border-color: var(--line); }
+  .opt .ic { width: 16px; height: 16px; flex-shrink: 0; margin-top: 3px; border-radius: 50%; border: 2px solid #d1d5db; display: grid; place-items: center; font-size: 10px; color: #fff; font-weight: 700; }
+  .opt.correct { border-color: var(--ok); color: var(--ok); font-weight: 500; }
+  .opt.correct .ic { background: var(--ok); border-color: var(--ok); }
+  .opt.wrong { border-color: var(--ng); color: var(--ng); font-weight: 500; }
+  .opt.wrong .ic { background: var(--ng); border-color: var(--ng); }
+  .verdict { font-weight: 700; margin: -12px 0 12px; }
+  .verdict.ok { color: var(--ok); } .verdict.ng { color: var(--ng); }
+  .explain { margin-top: 24px; background: var(--explain-bg); border-radius: 8px; padding: 16px; }
+  .explain div { font-size: 14px; font-weight: 500; color: var(--explain-fg); margin-bottom: 4px; }
+  .explain p { margin: 0; font-size: 14px; color: var(--explain-fg); line-height: 1.75; }
+  .btn { width: 100%; border: 0; border-radius: 6px; padding: 10px 16px; font-size: 14px; font-weight: 600; background: var(--primary); color: var(--on-primary); }
+  .btn.lg { padding: 13px 16px; font-size: 15px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.outline { background: var(--card); color: var(--fg); border: 1px solid var(--line); }
+  .help { font-size: 14px; color: var(--muted); text-align: center; margin: 12px 0 0; }
+  .result-title { font-size: 20px; font-weight: 700; display: flex; gap: 8px; margin: 0 0 24px; }
+  .result-title span { color: var(--primary); }
+  .result-msg { margin: 0 0 16px; }
+  .result-msg.ng { color: var(--ng); }
+  .related h3 { font-size: 18px; margin: 24px 0 0; }
+  .related .hscroll-row { padding-left: 0; }
+
+  /* ---------- dialogs / toast ---------- */
+  .overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.8); display: none; align-items: center; justify-content: center; padding: 18px; }
+  .overlay.show { display: flex; animation: fade .2s; }
+  @keyframes fade { from { opacity: 0; } }
+  .dialog { position: relative; width: 100%; max-width: 448px; background: var(--card); border-radius: 16px; padding: 18px; animation: zoom .25s cubic-bezier(.22,1,.36,1); }
+  @keyframes zoom { from { opacity: 0; transform: scale(.95); } }
+  .x { position: absolute; top: 12px; right: 12px; border: 0; background: none; font-size: 22px; line-height: 1; color: var(--muted); padding: 4px; }
+  .dialog h2 { text-align: center; font-size: 20px; margin: 8px 0 16px; }
+  .dialog .desc { text-align: center; color: var(--muted); font-size: 14px; margin: 0 0 16px; }
+  .clear-img {
+    border-radius: 8px; background: var(--hero); min-height: 170px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 20px; color: #0a3d35;
+  }
+  .clear-img small { font-size: 13px; letter-spacing: .3em; font-weight: 700; }
+  .clear-img strong { font-size: 22px; margin: 8px 0; }
+  .clear-img span { font-size: 13px; font-weight: 500; }
+  .gain { text-align: center; font-size: 14px; font-weight: 500; margin: 16px 0; }
+  .gain b { color: var(--primary); font-size: 18px; }
+  .lvup { max-width: 360px; text-align: center; padding: 24px; }
+  .lvup h2 { font-size: 24px; line-height: 1.4; }
+  .lv-circle {
+    width: 134px; height: 134px; border-radius: 50%; background: var(--level); margin: 12px auto 24px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #fff;
+    animation: bounce .6s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes bounce { from { transform: scale(.4); opacity: 0; } }
+  .lv-circle small { font-size: 18px; font-weight: 500; letter-spacing: .1em; line-height: 1; }
+  .lv-circle strong { font-size: 60px; font-weight: 700; line-height: .85; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; z-index: 40; width: calc(100% - 32px); max-width: 380px;
+    transform: translate(-50%, 140%); transition: transform .4s cubic-bezier(.22,1,.36,1);
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,.15); padding: 16px;
+  }
+  .toast.show { transform: translate(-50%, 0); }
+  .toast-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; font-size: 14px; }
+  .toast-top b { color: var(--primary); font-size: 16px; }
+
+  .confetti { position: fixed; inset: 0; pointer-events: none; z-index: 60; overflow: hidden; }
+  .confetti i { position: absolute; top: -10vh; width: 8px; height: 14px; border-radius: 2px; animation: confettiFall linear forwards; }
+  @keyframes confettiFall { to { transform: translateY(115vh) rotate(720deg); opacity: .5; } }
+
+  .foot { text-align: center; padding: 48px 16px; font-size: 12px; color: var(--muted); }
+  .foot button { border: 0; background: none; color: var(--muted); text-decoration: underline; font-size: 12px; }
+
+  @media (min-width: 768px) {
+    .cat h3, .hscroll-row { padding-left: 40px; }
+    .page-title { font-size: 30px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#/"><span class="brand-mark">∈</span>暗記ボード</a>
+    <div class="nav-links">
+      <span class="lv-pill" id="nav-lv">LV.1</span>
+      <a href="../">トップ</a>
+    </div>
+  </div>
+</nav>
+
+<div id="app"></div>
+
+<div class="overlay" id="complete-dialog" role="dialog" aria-modal="true"><div class="dialog" id="complete-body"></div></div>
+<div class="overlay" id="lvup-dialog" role="dialog" aria-modal="true"><div class="dialog lvup" id="lvup-body"></div></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+/* ================= データ（斎藤毅『集合と位相』第1章） ================= */
+const TYPES = {
+  def:  { label: "定義",       color: "#2f62c9" },
+  thm:  { label: "定理・公式", color: "#c8382e" },
+  ex:   { label: "例・結論",   color: "#7b44b8" },
+  term: { label: "用語",       color: "#2b8a4b" },
+  warn: { label: "落とし穴",   color: "#d07a12" },
+};
+const SECS = {
+  1: { title: "論理と記号", icon: "∀" },
+  2: { title: "集合の構成", icon: "∅" },
+  3: { title: "関係：同値関係と順序", icon: "∼" },
+  4: { title: "証明の型と頻出の結論", icon: "∴" },
+};
+
+// [id, 節, 種類, 問, 答]
+const CARDS = [
+  ["1-01", 1, "def", "X ⊂ Y の定義を論理記号で", "∀x (x ∈ X ⇒ x ∈ Y)\nX ⊃ Y は Y ⊂ X のこと。"],
+  ["1-02", 1, "def", "X = Y の定義（同値な言い換え2通り）", "X ⊂ Y ∧ X ⊃ Y ⇔ ∀x (x ∈ X ⇔ x ∈ Y)\n示すには両方向の包含を示す。"],
+  ["1-03", 1, "def", "真部分集合 X ⊊ Y の定義", "X ⊂ Y ∧ X ≠ Y"],
+  ["1-04", 1, "thm", "包含 ⊂ がみたす2つの基本性質", "反射：X ⊂ X\n推移：X ⊂ Y ∧ Y ⊂ Z ⇒ X ⊂ Z"],
+  ["1-05", 1, "def", "P ⇔ Q の定義", "(P ⇒ Q) ∧ (Q ⇒ P)"],
+  ["1-06", 1, "def", "P ⇒ Q の逆と対偶", "逆：Q ⇒ P\n対偶：¬Q ⇒ ¬P（もとの命題と同値）"],
+  ["1-07", 1, "def", "論理記号の優先順位（弱 → 強）", "∧, ∨, ⇒ → ¬ → ∈, ⊂"],
+  ["1-08", 1, "def", "略記 ∀x ∈ X, P と ∃x ∈ X, P の意味", "∀x ∈ X, P ⇔ ∀x (x ∈ X ⇒ P)\n∃x ∈ X, P ⇔ ∃x (x ∈ X ∧ P)\n∀ は ⇒ と、∃ は ∧ と組み合わせる。"],
+  ["1-09", 1, "thm", "二重否定（排中律）と背理法", "¬(¬P) ⇔ P\nP の否定から矛盾を導き P を示すのが背理法。"],
+  ["1-10", 1, "thm", "ド・モルガンの法則（論理）", "¬(P ∨ Q) ⇔ ¬P ∧ ¬Q\n¬(P ∧ Q) ⇔ ¬P ∨ ¬Q"],
+  ["1-11", 1, "thm", "P ⇒ Q は何の略記と考えられる？", "¬P ∨ Q\n（P ∨ Q を ¬(¬P ∧ ¬Q) で定義することもできる）"],
+  ["1-12", 1, "warn", "∀x (P ⇒ Q) と (∀x P) ⇒ Q は同じ意味？", "違う。後者は仮定 ∀x P が成り立たないことが多く、仮定が偽なら含意は常に真。"],
+  ["1-13", 1, "warn", "P ⇒ Q が成り立てば Q ⇒ P も成り立つ？", "成り立つとは限らない。"],
+  ["1-14", 1, "warn", "「P かつ Q または R」の問題点", "(P ∧ Q) ∨ R か P ∧ (Q ∨ R) か決まらない。括弧を省かない。"],
+  ["1-15", 1, "warn", "「存在する」を読むときの注意", "どの変数にかかっているかを確認する。\n（R_A の定義では、A ではなく長さ n と列 x₀, …, xₙ が存在する）"],
+
+  ["2-01", 2, "def", "A = {x ∈ X | P} を論理式で", "∀x (x ∈ A ⇔ (x ∈ X ∧ P))"],
+  ["2-02", 2, "def", "{x ∈ X | P} の P に使える条件・使えない条件", "形式化できる条件でなければならない。\n不可：「十分大きい」「限りなく大きくなる」\n可：「n ≥ m」「n は偶数」"],
+  ["2-03", 2, "def", "部分集合 A ⊂ X を条件で表すと？", "A = {x ∈ X | x ∈ A}（任意の部分集合は条件で表せる）"],
+  ["2-04", 2, "def", "空集合 ∅ の定義と、X = ∅ の言い換え", "∅ = {x ∈ X | x ≠ x}\nX = ∅ ⇔ ∀x (x ∉ X)"],
+  ["2-05", 2, "thm", "空集合の包含に関する性質（2つ）", "任意の X に対し ∅ ⊂ X。\n∅ の部分集合は ∅ のみ。"],
+  ["2-06", 2, "def", "A = {x ∈ X | P}, B = {x ∈ X | Q} のとき A ⊂ B ⇔ ？ また「P は Q より強い」の定義", "A ⊂ B ⇔ (∀x ∈ X, P ⇒ Q)\nP は Q より強い ⇔ A ⊂ B\nP と Q が同値 ⇔ A = B"],
+  ["2-07", 2, "def", "{x ∈ X | P} = X ⇔ ？", "P が無条件に成り立つ。"],
+  ["2-08", 2, "def", "共通部分 A ∩ B と合併 A ∪ B の定義", "A ∩ B = {x ∈ X | x ∈ A ∧ x ∈ B}\nA ∪ B = {x ∈ X | x ∈ A ∨ x ∈ B}"],
+  ["2-09", 2, "def", "「A は B と交わる」の定義と、無縁和 A ⊔ B", "A ∩ B ≠ ∅ のとき交わる。\n交わらないとき A ∪ B を A ⊔ B（無縁和・非交和）と書く。"],
+  ["2-10", 2, "def", "補集合 X \\ A の定義と注意点", "X \\ A = {x ∈ X | x ∉ A}（Aᶜ とも）\n補集合を考えるには全体集合 X の指定が必要。"],
+  ["2-11", 2, "thm", "C ⊂ A ∩ B ⇔ ？　A ∪ B ⊂ C ⇔ ？", "C ⊂ A ∩ B ⇔ C ⊂ A ∧ C ⊂ B\nA ∪ B ⊂ C ⇔ A ⊂ C ∧ B ⊂ C"],
+  ["2-12", 2, "thm", "A ∩ B = A ⇔ ？　A ∪ B = A ⇔ ？", "A ∩ B = A ⇔ A ⊂ B\nA ∪ B = A ⇔ B ⊂ A"],
+  ["2-13", 2, "thm", "分配則（2つ）", "(A ∪ B) ∩ C = (A ∩ C) ∪ (B ∩ C)\n(A ∩ B) ∪ C = (A ∪ C) ∩ (B ∪ C)"],
+  ["2-14", 2, "thm", "ド・モルガンの法則（集合）と二重補集合", "X \\ (A ∪ B) = (X \\ A) ∩ (X \\ B)\nX \\ (A ∩ B) = (X \\ A) ∪ (X \\ B)\nX \\ (X \\ A) = A"],
+  ["2-15", 2, "thm", "A ⊂ B を補集合と合併で表すと？", "(X \\ A) ∪ B = X"],
+  ["2-16", 2, "warn", "ℝ² の x 軸と y 軸：集合としての和と部分空間としての和", "集合としての和は {xy = 0}、部分空間としての和は ℝ² 全体で、一般に一致しない。\nx 軸の補空間は無数にあるが、補集合は {y ≠ 0} ただ1つ。"],
+  ["2-17", 2, "def", "巾集合 𝒫(X) の定義", "X の部分集合をすべて元とする集合。\nY = 𝒫(X) ⇔ ∀x (x ∈ Y ⇔ x ⊂ X)\nA ⊂ B ⇔ A ∈ 𝒫(B)\n（正しい漢字は「冪集合」）"],
+  ["2-18", 2, "thm", "|X| = n のとき |𝒫(X)| は？", "2ⁿ"],
+  ["2-19", 2, "ex", "𝒫(∅) と 𝒫(𝒫(∅)) は？", "𝒫(∅) = {∅}\n𝒫(𝒫(∅)) = {∅, {∅}}"],
+  ["2-20", 2, "ex", "∅ ∈ ∅ ？　∅ ∈ 𝒫(∅) ？　∅ = 𝒫(∅) ？", "∅ ∉ ∅、∅ ∈ 𝒫(∅)、∅ ≠ 𝒫(∅)\nさらに ∅ ∈ 𝒫(𝒫(∅))、𝒫(∅) ∈ 𝒫(𝒫(∅))"],
+  ["2-21", 2, "def", "X = {a, b} の定義。a = b のときは？", "∀x (x ∈ X ⇔ x = a ∨ x = b)\na = b のとき {a, b} = {a}（元は1つ）。∅ = {}。"],
+  ["2-22", 2, "def", "対 (a, b) の定義", "(a, b) := {{a}, {a, b}}\na を第1成分、b を第2成分という。"],
+  ["2-23", 2, "thm", "対の性質と、(a, b) を {a, b} で定義できない理由", "(a, b) = (c, d) ⇔ a = c ∧ b = d\n{a, b} = {b, a} なので順序が区別できない。"],
+  ["2-24", 2, "def", "積 X × Y の定義", "X × Y = {z ∈ 𝒫(𝒫(X ∪ Y)) | ∃x ∃y (x ∈ X ∧ y ∈ Y ∧ z = (x, y))}"],
+  ["2-25", 2, "thm", "|X| = n, |Y| = m のとき |X × Y|、および A ⊂ X ∧ B ⊂ Y のとき", "|X × Y| = nm\nA ⊂ X ∧ B ⊂ Y ⇒ A × B ⊂ X × Y"],
+  ["2-26", 2, "def", "n 組 (x₁, …, xₙ) と多数の合併の定義", "(x₁, …, xₙ) := ((x₁, …, xₙ₋₁), xₙ)\n(x₁, …, xₙ) = (y₁, …, yₙ) ⇔ ∀i, xᵢ = yᵢ\nX₁ ∪ … ∪ Xₙ := (X₁ ∪ … ∪ Xₙ₋₁) ∪ Xₙ"],
+  ["2-27", 2, "def", "自然数の集合論的構成（0 と n + 1）", "0 = ∅、n + 1 := n ∪ {n}\nn = {0, 1, …, n − 1}（n の元の個数は n 個）"],
+  ["2-28", 2, "ex", "1, 2, 3 を集合で書くと？", "1 = {0} = 𝒫(∅)\n2 = {0, 1} = 𝒫(𝒫(∅))\n3 = {0, 1, 2}"],
+  ["2-29", 2, "term", "基数と序数", "基数：全部でいくつあるか\n序数：1つ、2つ、と順に数える数え方"],
+  ["2-30", 2, "term", "ラッセルの背理", "「すべての集合を元とする集合」が存在すると矛盾する。→ 公理的集合論で構成法を制限する。\n（公理的集合論が矛盾を含まないことは証明できないことが証明されている）"],
+  ["2-31", 2, "term", "定理・命題・補題・系の呼び分け", "定理：特に重要\n命題：それほど重要でない\n補題：証明の準備\n系：簡単に導かれる"],
+  ["2-32", 2, "term", "公理・形式化とは", "公理：理論の出発点として設定する命題（自明の真理という意味はない）\n形式化：普通の文を論理記号と集合の記号だけで表すこと"],
+
+  ["3-01", 3, "def", "X の2項関係 R のグラフ", "C = {(x, y) ∈ X × X | R} ⊂ X × X\nx ∼_R y ⇔ (x, y) が R をみたす"],
+  ["3-02", 3, "def", "「R は R′ より細かい」「R と R′ が同値」の定義", "細かい ⇔ C ⊂ C′\n同値 ⇔ C = C′（C, C′ はグラフ）"],
+  ["3-03", 3, "def", "対角集合と合同関係", "対角集合：相等関係 x = y のグラフ {(x, y) | x = y}\n合同関係：x ≡ y (mod n) ⇔ x − y が n で割り切れる（X = ℤ）"],
+  ["3-04", 3, "def", "同値関係の3条件", "(1) 反射律：∀x ∈ X, x ∼ x\n(2) 対称律：∀x, y ∈ X, x ∼ y ⇒ y ∼ x\n(3) 推移律：∀x, y, z ∈ X, (x ∼ y ∧ y ∼ z) ⇒ x ∼ z"],
+  ["3-05", 3, "def", "a の同値類の定義。「A が同値類」とは？", "{x ∈ X | x ∼_R a}\nA が同値類 ⇔ ∃x ∈ A, A = {y ∈ X | y ∼_R x}"],
+  ["3-06", 3, "ex", "相等関係での x の同値類／mod n の合同関係での m の同値類", "相等関係：{x}\n合同関係：m + nℤ = {ℓ ∈ ℤ | ∃r ∈ ℤ, ℓ = m + nr}（m = 0 なら nℤ）"],
+  ["3-07", 3, "ex", "グラフが X × X 全体の関係、Δ_X の関係は同値関係？", "どちらも同値関係のグラフ。"],
+  ["3-08", 3, "def", "順序の3条件", "(1) 反射律：∀x, x ≤ x\n(2) 反対称律：∀x, y, (x ≤ y ∧ y ≤ x) ⇒ x = y\n(3) 推移律：∀x, y, z, (x ≤ y ∧ y ≤ z) ⇒ x ≤ z"],
+  ["3-09", 3, "def", "全順序の追加条件 (4)", "∀x, y ∈ X, x ≤ y ∨ y ≤ x（任意の2元が比較可能）"],
+  ["3-10", 3, "ex", "𝒫(X) 上の包含関係 ⊂ は順序？全順序？", "順序。全順序になるのは |X| ≤ 1 のときに限る。\n反例：相異なる a, b ∈ X に対し {a} と {b} は比較不可能。"],
+  ["3-11", 3, "ex", "ℕ 上の整除関係 m | n は順序？全順序？", "順序だが全順序でない（2 と 3 が比較不可能）。\nm | n ⇔ ∃ℓ, ℓm = n"],
+  ["3-12", 3, "ex", "ℤ 上の整除関係は順序？", "順序でない。2 | −2 かつ −2 | 2 だが 2 ≠ −2（反対称律が不成立）。"],
+  ["3-13", 3, "warn", "反射律は対称律と推移律から導ける？", "導けない。「x ∼ y なら y ∼ x、よって x ∼ x」は、x がどの元とも関係をもたない可能性を無視した誤り。必ず単独で示す。"],
+  ["3-14", 3, "warn", "反対称律の結論は何？", "関係ではなく等号 x = y。"],
+  ["3-15", 3, "warn", "整除の記号 | の注意", "条件で定まる部分集合の記号 {x | …} の | と紛らわしい。"],
+
+  ["4-01", 4, "thm", "X ⊂ Y と X = Y の証明の型", "X ⊂ Y：任意の x ∈ X をとり、x ∈ Y を示す。\nX = Y：X ⊂ Y と Y ⊂ X の両方を示す。"],
+  ["4-02", 4, "thm", "P ⇒ Q の証明の型。仮定が常に偽なら？", "P を仮定して Q を示す。\n仮定が常に偽なら自動的に真（空虚に真）。"],
+  ["4-03", 4, "thm", "推移律が成り立たない例の作り方", "一番単純な集合（1点集合とその和集合）で反例を作る。\n例：A = {x}、B = {x, y}、C = {y}（x ≠ y）"],
+  ["4-04", 4, "thm", "「条件を求めよ」型の注意", "反例が作れる側（必要性）だけでなく、逆（十分性）も確認して必要十分条件にする。"],
+  ["4-05", 4, "thm", "列を使う定義（R_A）の反射律・対称律・推移律の示し方", "反射律：n = 0 を選ぶ。\n対称律：yⱼ := xₙ₋ⱼ と添字を振り直して列を反転。\n推移律：wₖ := xₖ (k ≤ n)、wₖ := yₖ₋ₙ (k ≥ n) として2本の列を接続。"],
+  ["4-06", 4, "warn", "「…」で飛ばしたくなる箇所の扱い", "証明の核心。自然数の性質（帰納法）は集合として構成した定義から示し、素朴な大小関係を持ち込まない。"],
+  ["4-07", 4, "ex", "A1.4.1：N ⊂ 𝒫(X) が (1) ∅ ∈ N、(2) A, B ∈ N ∧ C ⊂ A ∪ B ⇒ C ∈ N をみたすとき、同値関係になるのは？", "A ∼ B ⇔ (A ∪ B) \\ (A ∩ B) ∈ N\n∅ の同値類は N そのもの（∅ ∼ B ⇔ B ∈ N）。"],
+  ["4-08", 4, "ex", "A1.4.1：X = {0, 1, 2}、N = {∅, {2}} のとき同値類の個数は？", "4個"],
+  ["4-09", 4, "ex", "A1.4.2：x ∼ y ⇔ ∃a ∈ ℝ \\ {0}, x = ay（ℝ² 上）の同値類は？", "{(0, 0)} と、原点を通る各直線から原点を除いたもの。\n直線 x = 1 と交わらない類は {(0, y) | y ≠ 0} と {(0, 0)} の2つ。"],
+  ["4-10", 4, "ex", "A1.4.3：A ∼ B ⇔ A ∩ B ≠ ∅（𝒫(X) 上）は反射律・対称律・推移律をみたす？", "反射律：×（∅ ∩ ∅ = ∅）\n対称律：○\n推移律：|X| ≤ 1 のときに限り○"],
+  ["4-11", 4, "ex", "AP1.4.4：A ⊂ X × X が生成する同値関係 R_A の定義", "ᵗA = {(x, y) | (y, x) ∈ A} として\n∃n ≥ 0, ∃x = x₀, …, xₙ = y ∈ X, ∀i, (xᵢ₋₁, xᵢ) ∈ A ∪ ᵗA"],
+  ["4-12", 4, "ex", "A1.4.5：積順序と辞書式順序の定義", "積順序：(x, y) ≤ₚ (x′, y′) ⇔ x ≤₁ x′ ∧ y ≤₂ y′\n辞書式順序：(x, y) ≤ₗ (x′, y′) ⇔ x ≤₁ x′ ∧ (x = x′ ⇒ y ≤₂ y′)\nどちらも X × Y の順序。"],
+  ["4-13", 4, "ex", "B1.4.6：ℕ の ⊂ が全順序であることの証明方針と核心", "C(m, n)：m ⊂ n ∨ n ⊂ m を、n についての帰納法の中で m についての帰納法を使って示す（二重帰納法）。\n核心：m ⊊ n + 1 かつ n ⊊ m + 1 のとき m ∪ n が m と m + 1、n と n + 1 の間に挟まれ、m = n または m + 1 = n + 1。"],
+];
+const CARD = Object.fromEntries(CARDS.map(c => [c[0], { id: c[0], sec: c[1], type: c[2], q: c[3], a: c[4] }]));
+
+// [slug, 節, タイトル, 難易度, カードID, 説明]
+const MISSIONS = [
+  ["inclusion", 1, "集合の相等と包含", 1, ["1-01","1-02","1-03","1-04"], "∈ と ⊂ を論理記号で書けるようにしよう。X = Y を示すには両方向の包含。"],
+  ["logic-symbols", 1, "論理記号と優先順位", 1, ["1-05","1-06","1-07","1-08"], "⇔・逆・対偶、そして ∀ は ⇒、∃ は ∧ と組み合わせることを覚えよう。"],
+  ["logic-laws", 1, "論理の基本法則", 2, ["1-09","1-10","1-11"], "二重否定・ド・モルガン・含意の言い換え。背理法の根拠もここ。"],
+  ["logic-traps", 1, "論理の落とし穴", 2, ["1-12","1-13","1-14","1-15"], "学習中につまずきやすかったポイントをまとめて確認。"],
+  ["comprehension", 2, "条件で定まる部分集合", 1, ["2-01","2-02","2-03","2-04"], "{x ∈ X | P} の意味と、空集合の定義。"],
+  ["empty-strength", 2, "空集合と条件の強弱", 2, ["2-05","2-06","2-07"], "∅ ⊂ X と、条件の強弱 ⇔ 集合の包含の対応。"],
+  ["set-ops", 2, "共通部分・合併・補集合", 1, ["2-08","2-09","2-10","2-16"], "基本の集合演算と、線形空間の和・補空間との違い。"],
+  ["set-formulas", 2, "集合演算の公式", 2, ["2-11","2-12","2-13","2-14","2-15"], "分配則・ド・モルガン・包含の言い換えを一気に。"],
+  ["power-set", 2, "巾集合", 3, ["2-17","2-18","2-19","2-20"], "𝒫(∅) と 𝒫(𝒫(∅)) の元を正確に言えるかが勝負。"],
+  ["pairs-products", 2, "対と積", 3, ["2-21","2-22","2-23","2-24","2-25","2-26"], "(a, b) := {{a}, {a, b}} から積 X × Y・n 組まで。"],
+  ["naturals", 2, "自然数の構成", 2, ["2-27","2-28","2-29"], "0 = ∅、n + 1 := n ∪ {n}。基数と序数の違いも。"],
+  ["axiomatic", 2, "公理的集合論と用語", 1, ["2-30","2-31","2-32"], "ラッセルの背理と、定理・命題・補題・系の呼び分け。"],
+  ["relations", 3, "2項関係", 1, ["3-01","3-02","3-03"], "関係とそのグラフ、対角集合、合同関係。"],
+  ["equivalence", 3, "同値関係と同値類", 2, ["3-04","3-05","3-06","3-07"], "反射律・対称律・推移律と同値類の定義。"],
+  ["orders", 3, "順序と全順序", 2, ["3-08","3-09","3-13","3-14"], "反対称律の結論は等号。反射律は単独で示す。"],
+  ["order-examples", 3, "順序の例", 3, ["3-10","3-11","3-12","3-15"], "包含・大小・整除は順序？全順序？"],
+  ["proof-patterns", 4, "証明の型", 3, ["4-01","4-02","4-03","4-04","4-05","4-06"], "包含・含意・同値関係・反例づくりの定石。"],
+  ["exercises-1", 4, "演習 A1.4.1〜A1.4.3", 4, ["4-07","4-08","4-09","4-10"], "演習問題で得た結論を覚えておこう。"],
+  ["exercises-2", 4, "演習 AP1.4.4〜B1.4.6", 5, ["4-11","4-12","4-13"], "生成する同値関係・積順序と辞書式順序・二重帰納法。"],
+].map(([slug, sec, title, difficulty, cards, desc]) => ({ slug, sec, title, difficulty, cards, desc }));
+const WEAK_SLUG = "weak";
+
+/* ================= レベル計算（アクションボードと同じ式） ================= */
+const xpDelta = L => 40 + 15 * (L - 1);
+const totalXp = L => (L - 1) * (25 + (15 / 2) * L);
+const calcLevel = xp => { let L = 1; while (totalXp(L + 1) <= xp && L < 1000) L++; return L; };
+const toNext = xp => Math.max(0, totalXp(calcLevel(xp) + 1) - xp);
+const progress = xp => { const L = calcLevel(xp), d = xpDelta(L); return Math.max(0, Math.min(1, (d - toNext(xp)) / d)); };
+const missionXp = (difficulty, featured) => [0, 50, 100, 200, 400, 800][difficulty] * (featured ? 2 : 1);
+
+/* ================= 状態 ================= */
+const KEY = "set-theory-ch1-actionboard-v1";
+const S = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } })();
+S.xp ??= 0; S.clears ??= {}; S.miss ??= {}; S.correct ??= {}; S.log ??= []; S.name ??= "あなた";
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const stars = n => "⭐".repeat(n);
+const $ = s => document.querySelector(s);
+
+function weakMission() {
+  const ids = Object.entries(S.miss).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id]) => id);
+  if (!ids.length) return null;
+  return { slug: WEAK_SLUG, sec: 0, title: "苦手克服ミッション", difficulty: 3, cards: ids, featured: true,
+    desc: "これまでに間違えた問題から、間違いが多いものを最大5問出題します。正解すると苦手リストから外れていきます。" };
+}
+const findMission = slug => slug === WEAK_SLUG ? weakMission() : MISSIONS.find(m => m.slug === slug);
+const iconOf = m => m.featured ? "🔥" : SECS[m.sec].icon;
+
+/* ================= 共通パーツ ================= */
+function progressBlock(xp, id = "") {
+  return `<div class="next"><span>次のレベルまで</span><b>${Math.round(toNext(xp)).toLocaleString()}ポイント🔥</b></div>
+    <div class="track"><div class="fill" ${id ? `id="${id}"` : ""} style="width:${progress(xp) * 100}%"></div></div>`;
+}
+
+function missionCard(m) {
+  const n = S.clears[m.slug] || 0;
+  const status = n > 0
+    ? `<span class="status done">✓ 達成済み</span>`
+    : `<span class="status">◌ ${n}回達成</span>`;
+  return `<article class="card m-card">
+    <div class="m-head">
+      <div class="m-icon-col"><div class="m-icon${m.featured ? " feat" : ""}">${iconOf(m)}</div>${status}</div>
+      <div><h4 class="m-title">${esc(m.title)}</h4><div class="m-sub">${m.featured ? "間違えた問題から出題" : `§${m.sec} ${SECS[m.sec].title}`}</div></div>
+    </div>
+    <div class="m-foot">
+      <div class="m-meta">
+        <div class="row">📝 全${m.cards.length}問 ・ ${n > 0 ? `${n}回クリア` : "未挑戦"}</div>
+        <div class="row">
+          <span class="badge">難易度 ${stars(m.difficulty)}</span>
+          <span class="badge${m.featured ? " feat" : ""}">${missionXp(m.difficulty)}P${m.featured ? " x 2" : ""}</span>
+        </div>
+      </div>
+      <a class="cta${n > 0 ? " again" : ""}" href="#/missions/${m.slug}">${n > 0 ? "もう一回チャレンジ🔥" : "今すぐチャレンジ🔥"}</a>
+    </div>
+  </article>`;
+}
+
+function hscroll(inner) {
+  return `<div class="hscroll-wrap"><button class="arrow l" aria-label="左へ">‹</button><div class="hscroll"><div class="hscroll-row">${inner}</div></div><button class="arrow r" aria-label="右へ">›</button></div>`;
+}
+function wireScroll() {
+  document.querySelectorAll(".hscroll-wrap").forEach(w => {
+    const sc = w.querySelector(".hscroll"), l = w.querySelector(".arrow.l"), r = w.querySelector(".arrow.r");
+    const upd = () => { l.classList.toggle("show", sc.scrollLeft > 0); r.classList.toggle("show", sc.scrollLeft < sc.scrollWidth - sc.clientWidth - 1); };
+    l.onclick = () => sc.scrollBy({ left: -316, behavior: "smooth" });
+    r.onclick = () => sc.scrollBy({ left: 316, behavior: "smooth" });
+    sc.addEventListener("scroll", upd, { passive: true }); new ResizeObserver(upd).observe(sc); upd();
+  });
+}
+
+function ago(t) {
+  const s = (Date.now() - t) / 1000;
+  if (s < 60) return "たった今";
+  if (s < 3600) return `${s / 60 | 0}分前`;
+  if (s < 86400) return `${s / 3600 | 0}時間前`;
+  return `${s / 86400 | 0}日前`;
+}
+
+/* ================= ホーム ================= */
+function renderHome() {
+  const L = calcLevel(S.xp);
+  const cleared = MISSIONS.filter(m => S.clears[m.slug]).length;
+  const learned = CARDS.filter(c => S.correct[c[0]] && !S.miss[c[0]]).length;
+  const weak = weakMission();
+  const firstUncleared = MISSIONS.filter(m => !S.clears[m.slug]).slice(0, 3);
+
+  $("#app").innerHTML = `
+    <section class="hero"><div class="profile-wrap"><div class="profile">
+      <div class="profile-row">
+        <div class="avatar">${esc(S.name.slice(0, 1))}</div>
+        <div class="profile-info">
+          <div class="p-name">${esc(S.name)}<button id="rename" aria-label="名前を変更">✎</button></div>
+          <div class="p-lv"><div><b>LV.</b><strong>${L}</strong></div><span>📖 第1章 集合</span></div>
+          <div class="p-xp">${S.xp.toLocaleString()} ポイント</div>
+        </div>
+      </div>
+      ${progressBlock(S.xp)}
+    </div></div></section>
+
+    <section class="metrics">
+      <div class="metric"><small>クリアしたミッション</small><strong>${cleared}<span> / ${MISSIONS.length}</span></strong></div>
+      <div class="metric"><small>覚えた問題</small><strong>${learned}<span> / ${CARDS.length}</span></strong></div>
+    </section>
+
+    ${firstUncleared.length && cleared < 3 ? `
+    <section class="cat"><h3>🔰 はじめのミッション</h3>${hscroll(firstUncleared.map(missionCard).join(""))}</section>` : ""}
+
+    ${weak ? `<section class="cat"><h3>🔥 苦手克服</h3>${hscroll(missionCard(weak))}</section>` : ""}
+
+    <h2 class="page-title">🎯 ミッション</h2>
+    ${Object.entries(SECS).map(([k, s]) => {
+      const ms = MISSIONS.filter(m => m.sec == k);
+      const done = ms.filter(m => S.clears[m.slug]).length;
+      return `<section class="cat"><h3>${k}. ${s.title}<small>${done}/${ms.length} クリア</small></h3>${hscroll(ms.map(missionCard).join(""))}</section>`;
+    }).join("")}
+
+    <h2 class="page-title">⚡ 活動タイムライン</h2>
+    <section class="acts"><div class="card act-list">
+      ${S.log.length ? S.log.slice(0, 10).map(e => `<div class="act"><span class="dot">${esc(S.name.slice(0, 1))}</span><span>「${esc(e.title)}」を達成しました！</span><time>${ago(e.t)}</time></div>`).join("")
+        : `<div class="empty">ミッションを達成するとここに表示されます</div>`}
+    </div></section>
+
+    <footer class="foot">斎藤毅『集合と位相』第1章 暗記事項まとめより ・ <button id="reset">記録をリセット</button></footer>`;
+
+  $("#rename").onclick = () => { const n = prompt("表示名", S.name); if (n && n.trim()) { S.name = n.trim().slice(0, 20); save(); render(); } };
+  $("#reset").onclick = () => { if (confirm("ポイント・達成記録をすべて消去しますか？")) { localStorage.removeItem(KEY); location.reload(); } };
+  wireScroll();
+}
+
+/* ================= ミッション詳細 ================= */
+let quiz = null; // { slug, questions:[{id, options:[cardId...]}], answers:{}, result }
+
+function buildQuiz(m) {
+  return {
+    slug: m.slug, mission: m, answers: {}, result: null,
+    questions: shuffle(m.cards).map(id => {
+      const c = CARD[id];
+      const others = CARDS.filter(x => x[0] !== id).map(x => CARD[x[0]]);
+      const rank = x => (x.sec === c.sec ? 0 : 2) + (x.type === c.type ? 0 : 1);
+      const pool = shuffle(others).sort((a, b) => rank(a) - rank(b));
+      const distract = [];
+      for (const x of pool) { if (distract.length === 3) break; if (!distract.some(d => d.a === x.a)) distract.push(x); }
+      return { id, options: shuffle([id, ...distract.map(d => d.id)]) };
+    }),
+  };
+}
+
+function renderMission(slug) {
+  const m = (quiz && quiz.slug === slug && quiz.mission) || findMission(slug);
+  if (!m) { $("#app").innerHTML = `<div class="detail"><div class="card pad">ミッションが見つかりません。<p><a href="#/">ホームへ戻る</a></p></div></div>`; return; }
+  if (!quiz || quiz.slug !== slug) quiz = buildQuiz(m);
+  const n = S.clears[m.slug] || 0;
+  const related = m.featured ? MISSIONS.filter(x => !S.clears[x.slug]).slice(0, 6) : MISSIONS.filter(x => x.sec === m.sec && x.slug !== m.slug);
+
+  const studyCard = `<div class="card pad">
+      <h3 class="h-card">学習カード</h3>
+      <p class="note">カードで答えを確認してからクイズに挑戦しましょう！</p>
+      ${m.cards.map(id => { const c = CARD[id], t = TYPES[c.type]; return `
+        <div class="study-item">
+          <button class="study-q"><span class="tg" style="background:${t.color}">${t.label}</span><span class="math">${esc(c.q)}</span><span class="chev">⌄</span></button>
+          <div class="study-a math">${esc(c.a)}</div>
+        </div>`; }).join("")}
+    </div>`;
+
+  let quizHTML;
+  if (!quiz.result) {
+    const all = quiz.questions.every(q => quiz.answers[q.id]);
+    quizHTML = quiz.questions.map((q, i) => `
+      <div class="card pad">
+        <h3 class="q-title math">Q${i + 1}. ${esc(CARD[q.id].q)}</h3>
+        <div class="opts">${q.options.map(o => `
+          <label class="opt${quiz.answers[q.id] === o ? " sel" : ""}">
+            <input type="radio" name="q-${q.id}" value="${o}" ${quiz.answers[q.id] === o ? "checked" : ""} data-q="${q.id}">
+            <span class="math">${esc(CARD[o].a)}</span>
+          </label>`).join("")}</div>
+      </div>`).join("") + `
+      <div class="card pad">
+        <button class="btn" id="submit" ${all ? "" : "disabled"}>回答する</button>
+        ${all ? "" : `<p class="help">すべての問題に回答してから提出してください</p>`}
+      </div>`;
+  } else {
+    const r = quiz.result;
+    quizHTML = quiz.questions.map((q, i) => {
+      const ok = quiz.answers[q.id] === q.id;
+      return `<div class="card pad">
+        <h3 class="q-title math">Q${i + 1}. ${esc(CARD[q.id].q)}</h3>
+        <div class="verdict ${ok ? "ok" : "ng"}">${ok ? "正解" : "不正解"}</div>
+        <div class="opts">${q.options.map(o => {
+          const cls = o === q.id ? "correct" : (o === quiz.answers[q.id] ? "wrong" : "");
+          return `<div class="opt res ${cls}"><span class="ic">${cls === "correct" ? "✓" : cls === "wrong" ? "✕" : ""}</span><span class="math">${esc(CARD[o].a)}</span></div>`;
+        }).join("")}</div>
+        <div class="explain"><div>解説</div><p class="math">${esc(CARD[q.id].a)}</p></div>
+      </div>`;
+    }).join("") + `
+      <div class="card pad" id="result-card">
+        <div class="result-title"><div>結果: ${r.total}問中</div><span>${r.correct}問正解</span></div>
+        ${r.passed
+          ? `<p class="result-msg">ミッション達成！${m.featured ? "苦手克服" : SECS[m.sec].title}マスターですね！</p>
+             ${r.recorded ? `<button class="btn lg outline" id="retry">もう一回チャレンジする</button>`
+                          : `<button class="btn lg" id="record">ミッション完了を記録する</button>`}`
+          : `<p class="result-msg ng">全問正解が必要です。再挑戦してください</p><button class="btn outline" id="retry">再挑戦する</button>`}
+      </div>`;
+  }
+
+  $("#app").innerHTML = `<div class="detail">
+    <div class="crumb"><a href="#/">ホーム</a><span>›</span><span>${m.featured ? "苦手克服" : esc(SECS[m.sec].title)}</span></div>
+    <div class="card pad">
+      <div class="d-head">
+        <div class="m-icon${m.featured ? " feat" : ""}">${iconOf(m)}</div>
+        <div>
+          <h1 class="d-title">${esc(m.title)}</h1>
+          <div class="chips">
+            <span class="badge outline">難易度: ${stars(m.difficulty)}</span>
+            <span class="badge${m.featured ? " feat" : ""}">${missionXp(m.difficulty)}P${m.featured ? " x 2" : ""}</span>
+            <span class="badge">${n}回達成</span>
+          </div>
+        </div>
+      </div>
+      <div class="d-body">${esc(m.desc)}<br>全${m.cards.length}問。<b>全問正解</b>でミッション達成です。</div>
+    </div>
+    ${studyCard}
+    ${quizHTML}
+    ${related.length ? `<section class="related"><h3>${m.featured ? "未クリアのミッション" : "このカテゴリの他のミッション"}</h3>${hscroll(related.map(missionCard).join(""))}</section>` : ""}
+  </div>`;
+
+  document.querySelectorAll(".study-q").forEach(b => b.onclick = () => b.parentElement.classList.toggle("open"));
+  document.querySelectorAll("input[type=radio]").forEach(inp => inp.onchange = () => {
+    quiz.answers[inp.dataset.q] = inp.value;
+    const y = scrollY; renderMission(slug); scrollTo(0, y);
+  });
+  $("#submit")?.addEventListener("click", () => submitQuiz(m));
+  $("#retry")?.addEventListener("click", () => { const nm = findMission(slug); if (!nm) { location.hash = "#/"; return; } quiz = buildQuiz(nm); renderMission(slug); scrollTo({ top: 0, behavior: "smooth" }); });
+  $("#record")?.addEventListener("click", () => recordClear(m));
+  wireScroll();
+}
+
+function submitQuiz(m) {
+  let correct = 0;
+  for (const q of quiz.questions) {
+    if (quiz.answers[q.id] === q.id) {
+      correct++; S.correct[q.id] = (S.correct[q.id] || 0) + 1;
+      if (S.miss[q.id]) { S.miss[q.id]--; if (!S.miss[q.id]) delete S.miss[q.id]; }
+    } else {
+      S.miss[q.id] = (S.miss[q.id] || 0) + 1;
+    }
+  }
+  save();
+  quiz.result = { total: quiz.questions.length, correct, passed: correct === quiz.questions.length, recorded: false };
+  renderMission(m.slug);
+  setTimeout(() => {
+    if (quiz.result.passed) $("#result-card").scrollIntoView({ behavior: "smooth", block: "start" });
+    else scrollTo({ top: 0, behavior: "smooth" });
+  }, 100);
+}
+
+/* ================= 達成フロー：ダイアログ → ポイントトースト → レベルアップ ================= */
+function recordClear(m) {
+  const gained = missionXp(m.difficulty, m.featured);
+  const before = S.xp;
+  S.xp += gained;
+  S.clears[m.slug] = (S.clears[m.slug] || 0) + 1;
+  S.log.unshift({ slug: m.slug, title: m.title, t: Date.now() }); S.log = S.log.slice(0, 30);
+  save();
+  quiz.result.recorded = true;
+  renderMission(m.slug);
+  confetti();
+
+  $("#complete-body").innerHTML = `
+    <button class="x" data-close aria-label="閉じる">×</button>
+    <h2>おめでとうございます！</h2>
+    <p class="desc">「${esc(m.title)}」を達成しました！</p>
+    <div class="clear-img"><small>MISSION CLEAR</small><strong>${esc(m.title)}</strong><span>${m.featured ? "苦手克服" : `第1章 集合 ・ §${m.sec}`}</span></div>
+    <p class="gain"><b>+${gained}</b> ポイント獲得</p>
+    <button class="btn" data-close>このまま閉じる</button>`;
+  openDialog("#complete-dialog", () => showXpToast(before, gained));
+}
+
+function openDialog(sel, onClose) {
+  const el = $(sel);
+  el.classList.add("show");
+  const close = () => { el.classList.remove("show"); el.onclick = null; onClose && onClose(); };
+  el.onclick = e => { if (e.target === el || e.target.closest("[data-close]")) close(); };
+}
+
+let toastTimer;
+function showXpToast(before, gained) {
+  const after = before + gained, L0 = calcLevel(before), L1 = calcLevel(after);
+  const t = $("#toast");
+  t.innerHTML = `<div class="toast-top"><span>LV.${L0}</span><b>+${gained} ポイント</b></div>
+    ${progressBlock(before, "toast-fill")}`;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    // レベルをまたぐ場合は一度満タンまで伸ばしてからレベルアップ演出
+    $("#toast-fill").style.width = (L1 > L0 ? 100 : progress(after) * 100) + "%";
+  }));
+  toastTimer = setTimeout(() => {
+    if (L1 > L0) {
+      t.classList.remove("show");
+      $("#lvup-body").innerHTML = `<button class="x" data-close aria-label="閉じる">×</button>
+        <h2>暗記レベルが<br>アップしました！</h2>
+        <div class="lv-circle"><small>LEVEL</small><strong>${L1}</strong></div>
+        <button class="btn" data-close>閉じる</button>`;
+      openDialog("#lvup-dialog", () => { confettiStop(); });
+      confetti();
+    } else {
+      setTimeout(() => t.classList.remove("show"), 2000);
+    }
+  }, 1300);
+  updateNav();
+}
+
+let confettiEl;
+function confetti() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  confettiStop();
+  confettiEl = document.createElement("div"); confettiEl.className = "confetti";
+  const colors = ["#30baa7", "#47c991", "#64d8c6", "#fde047", "#f472b6", "#60a5fa"];
+  confettiEl.innerHTML = Array.from({ length: 70 }, () =>
+    `<i style="left:${Math.random() * 100}%;background:${colors[Math.random() * colors.length | 0]};animation-duration:${2 + Math.random() * 2}s;animation-delay:${Math.random() * .6}s;transform:rotate(${Math.random() * 360}deg)"></i>`).join("");
+  document.body.appendChild(confettiEl);
+  setTimeout(confettiStop, 4800);
+}
+function confettiStop() { confettiEl?.remove(); confettiEl = null; }
+
+/* ================= ルーティング ================= */
+function updateNav() { $("#nav-lv").textContent = `LV.${calcLevel(S.xp)}`; }
+function render() {
+  updateNav();
+  const m = location.hash.match(/^#\/missions\/([\w-]+)/);
+  if (m) renderMission(m[1]); else { quiz = null; renderHome(); }
+}
+addEventListener("hashchange", () => { render(); scrollTo(0, 0); });
+addEventListener("keydown", e => { if (e.key === "Escape") document.querySelectorAll(".overlay.show [data-close]")[0]?.click(); });
+render();
+</script>
+</body>
+</html>
