@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>アクションボード島（マップ試作）</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏝️</text></svg>">
+<style>
+  :root {
+    --sea:#8fd3cf; --ink:#3b3226; --paper:#fffaf0; --line:#e6dcc6;
+    --policy:#e07a5f; --pr:#eeb02f; --plan:#b678c9; --eng:#4a8fd9; --office:#7d8c9a; --all:#d9534a; --guest:#9a7b62;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; }
+  body {
+    margin:0; background:var(--sea); color:var(--ink); overflow:hidden;
+    font-family:"Hiragino Maru Gothic ProN","Zen Maru Gothic","M PLUS Rounded 1c","Yu Gothic","Noto Sans JP",sans-serif;
+    display:flex; flex-direction:column;
+  }
+  header {
+    flex:none; padding:calc(10px + env(safe-area-inset-top)) 16px 8px; background:var(--paper);
+    border-bottom:3px solid var(--line); z-index:2;
+  }
+  h1 { margin:0; font-size:17px; letter-spacing:.04em; }
+  h1 small { font-size:11px; font-weight:500; color:#8a7a62; margin-left:.5em; }
+  .chips { display:flex; gap:6px; overflow-x:auto; margin:8px -16px 0; padding:0 16px 2px; scrollbar-width:none; }
+  .chips::-webkit-scrollbar { display:none; }
+  .chip {
+    flex:none; border:2px solid var(--line); background:#fff; color:var(--ink); font:inherit; font-size:12px; font-weight:700;
+    padding:5px 10px 5px 8px; border-radius:99px; display:flex; align-items:center; gap:6px; cursor:pointer;
+  }
+  .chip i { width:10px; height:10px; border-radius:50%; background:var(--c); }
+  .chip[aria-pressed="true"] { border-color:var(--c); background:color-mix(in srgb, var(--c) 16%, #fff); }
+
+  #stage { flex:1; overflow:auto; position:relative; -webkit-overflow-scrolling:touch; }
+  #map { display:block; width:100%; height:auto; min-height:100%; }
+  @media (min-aspect-ratio: 1/1) { #map { width:auto; height:100%; margin:0 auto; } }
+
+  .zoom { position:fixed; right:12px; bottom:calc(16px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:6px; z-index:3; }
+  .zoom button {
+    width:44px; height:44px; border-radius:14px; border:3px solid var(--line); background:var(--paper); color:var(--ink);
+    font:700 22px/1 inherit; cursor:pointer; box-shadow:0 3px 0 rgba(59,50,38,.18);
+  }
+
+  .spot { cursor:pointer; }
+  .spot:focus { outline:none; }
+  .spot:focus-visible .hit { stroke:#fff; stroke-width:4; }
+  .label { font-weight:800; font-size:25px; fill:var(--ink); stroke:#fffaf0; stroke-width:7; paint-order:stroke; stroke-linejoin:round; text-anchor:middle; pointer-events:none; }
+  .label.s { font-size:19px; stroke-width:6; }
+  .dim .spot:not(.on), .dim .tree { opacity:.28; }
+  .spot, .tree { transition:opacity .25s; }
+  .spot.on .bob { animation:bob 1s ease-in-out infinite; }
+  @keyframes bob { 50% { transform:translateY(-5px); } }
+  .wave { animation:drift 7s ease-in-out infinite alternate; }
+  @keyframes drift { to { transform:translateX(14px); } }
+  @media (prefers-reduced-motion: reduce) { .wave, .spot.on .bob { animation:none; } }
+
+  #sheet {
+    position:fixed; left:0; right:0; bottom:0; z-index:4; background:var(--paper); border-top:3px solid var(--line);
+    border-radius:22px 22px 0 0; padding:14px 18px calc(18px + env(safe-area-inset-bottom));
+    transform:translateY(105%); transition:transform .28s cubic-bezier(.22,1,.36,1); max-height:60vh; overflow:auto;
+    box-shadow:0 -6px 24px rgba(59,50,38,.18);
+  }
+  #sheet.open { transform:none; }
+  #sheet .tag { display:inline-block; font-size:11px; font-weight:800; color:#fff; background:var(--c,#888); padding:3px 9px; border-radius:99px; }
+  #sheet h2 { margin:8px 0 4px; font-size:19px; }
+  #sheet p { margin:0 0 10px; font-size:14px; line-height:1.7; }
+  #sheet ul { margin:0; padding:0; list-style:none; display:grid; gap:6px; }
+  #sheet li { font-size:13px; background:#fff; border:2px solid var(--line); border-radius:12px; padding:8px 12px; }
+  #sheet .close { position:absolute; right:12px; top:10px; width:36px; height:36px; border:0; border-radius:50%; background:#efe6d2; font:700 16px/1 inherit; color:var(--ink); cursor:pointer; }
+  #sheet .note { font-size:11px; color:#8a7a62; margin-top:10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>アクションボード島<small>マップ試作 v0</small></h1>
+  <div class="chips" id="chips"></div>
+</header>
+<div id="stage"><svg id="map" viewBox="0 0 900 1200" role="img" aria-label="アクションボード島のマップ"></svg></div>
+<div class="zoom"><button id="zin" aria-label="拡大">＋</button><button id="zout" aria-label="縮小">－</button></div>
+<div id="sheet" role="dialog" aria-live="polite"></div>
+
+<script>
+(() => {
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('map');
+const el = (name, attrs = {}, parent = svg) => {
+  const n = document.createElementNS(NS, name);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  parent.appendChild(n); return n;
+};
+// なめらかな曲線（Catmull-Rom → ベジェ）
+const smooth = (pts, closed) => {
+  const n = pts.length, g = i => closed ? pts[(i + n) % n] : pts[Math.max(0, Math.min(n - 1, i))];
+  let d = `M${pts[0]}`;
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
+    const p0 = g(i - 1), p1 = g(i), p2 = g(i + 1), p3 = g(i + 2);
+    d += `C${p1[0] + (p2[0] - p0[0]) / 6},${p1[1] + (p2[1] - p0[1]) / 6} ${p2[0] - (p3[0] - p1[0]) / 6},${p2[1] - (p3[1] - p1[1]) / 6} ${p2}`;
+  }
+  return d + (closed ? 'Z' : '');
+};
+
+/* ---------- 部門・場所の定義（ここを書き換えるとマップが変わる） ---------- */
+const DEPTS = {
+  all:    { name:'全体',     color:'#d9534a' },
+  policy: { name:'政策立案', color:'#e07a5f' },
+  pr:     { name:'広報',     color:'#eeb02f' },
+  plan:   { name:'企画',     color:'#b678c9' },
+  eng:    { name:'エンジニア', color:'#4a8fd9' },
+  office: { name:'事務局',   color:'#7d8c9a' },
+  culture:{ name:'文化',     color:'#3fae8c' },
+};
+const grid = (x0, y0, cols, rows, dx, dy) => { const a = []; for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) a.push([x0 + c * dx + (r % 2) * 6, y0 + r * dy]); return a; };
+
+const BUILDINGS = [
+  { id:'hall',   dept:'all',    x:430, y:588, kind:'hall', label:'みんなの集会所',
+    desc:'学生チーム全員用の建物。島の真ん中の広場に建っている。',
+    todo:['全体タスクボード（今のアクションボードのトップ）','全体告知の掲示板','今週の達成・MVP の発表'] },
+  { id:'policy', dept:'policy', x:215, y:528, label:'政策立案の館',
+    desc:'政策立案部門の建物。まわりにメンバーの家が並ぶ、島でいちばん大きな集落。',
+    todo:['部門のタスクボード','リサーチノート・Polis の論点置き場','部門ミーティングの予定'] },
+  { id:'eng',    dept:'eng',    x:685, y:214, label:'エンジニア工房',
+    desc:'エンジニア部門の建物。滝の上の高台にある。',
+    todo:['開発タスク・Issue ボード','リリースのお知らせ','つくったツールの展示'] },
+  { id:'plan',   dept:'plan',   x:722, y:562, label:'企画のアトリエ',
+    desc:'企画部門の建物。川をわたった東の岸にある。',
+    todo:['イベント企画のタスクボード','アイデアのたまり場','開催スケジュール'] },
+  { id:'pr',     dept:'pr',     x:190, y:838, label:'広報スタジオ',
+    desc:'広報部門の建物。西の浜辺の近く。',
+    todo:['発信物の制作タスク','SNS 投稿カレンダー','素材置き場'] },
+  { id:'office', dept:'office', x:280, y:702, label:'事務局',
+    desc:'事務局の建物。集会所のすぐとなりで島全体を支える。',
+    todo:['運営タスク・手続き','新メンバーの受け入れ窓口','島のルール・ガイド'] },
+];
+const HOUSES = [ // 部門ごとの人数は 2026-11 時点のメンバー一覧から（名前は載せていない）
+  { dept:'policy', at: grid(130, 286, 4, 4, 54, 56) },
+  { dept:'eng',    at: grid(612, 320, 3, 2, 58, 54) },
+  { dept:'plan',   at: [[672,478],[748,470],[660,664],[718,674],[776,664],[690,728],[748,730]] },
+  { dept:'pr',     at: [[138,936],[196,950],[254,936]] },
+  { dept:'office', at: [[196,676],[204,742]] },
+  { dept:'all',    at: [[350,468],[406,458],[372,520]], note:'代表・サポーター' },
+];
+const ZONES = [
+  { id:'times',  dept:'culture', x:445, y:1000, label:'times通り',
+    desc:'集会所から船着き場へつづく並木道。メンバーそれぞれの「times」の立て札が並ぶ。',
+    todo:['各メンバーの times（つぶやき）を立て札として表示','新しい投稿があると札が光る','歩きながら近況を眺められる'] },
+  { id:'circle', dept:'culture', x:655, y:1010, label:'サークル広場',
+    desc:'サークルのテントが集まる広場。部門をこえた集まりの場所。',
+    todo:['サークルごとのテント（部室）','メンバー募集の看板','活動予定'] },
+  { id:'pier',   dept:'all', x:450, y:1150, label:'船着き場',
+    desc:'島の入口。ログインするとここに着く。',
+    todo:['はじめての人向けの案内','今日やることのサマリー'] },
+];
+
+/* ---------- 地形 ---------- */
+const ISLAND = [[450,100],[620,90],[770,150],[840,300],[830,470],[860,620],[820,780],[840,930],[740,1050],[560,1100],[450,1075],[330,1105],[180,1060],[90,920],[110,760],[60,600],[90,430],[70,280],[160,160],[300,110]];
+const PLATEAU = [[400,170],[560,140],[720,170],[790,290],[770,400],[640,432],[520,404],[420,420],[360,330],[350,230]];
+const RIVER_MAIN = [[470,236],[478,330],[505,410],[560,485],[598,585],[582,700],[540,762]];
+const RIVER_E = [[540,762],[620,800],[720,796],[810,820],[900,812]];
+const RIVER_W = [[540,762],[490,830],[430,880],[330,960],[262,1060],[236,1150]];
+const PATHS = [
+  [[430,640],[438,760],[448,870],[452,980],[450,1070]],            // times通り
+  [[452,960],[530,972],[620,952]],                                  // → サークル広場
+  [[480,600],[560,592],[640,588],[720,596]],                        // → 企画
+  [[700,600],[716,650],[720,706]],
+  [[720,560],[712,500]],
+  [[390,590],[320,570],[250,556],[215,550]],                        // → 政策立案
+  [[215,520],[212,420],[214,300]],
+  [[400,630],[340,690],[282,724]],                                  // → 事務局
+  [[396,646],[356,760],[270,812],[194,862]],                        // → 広報
+  [[196,862],[196,930]],
+  [[440,560],[470,490],[452,420],[470,340],[560,290],[640,250],[685,240]], // → エンジニア（坂道）
+  [[685,240],[672,300],[670,356]],
+  [[430,548],[400,500],[385,480]],
+];
+
+const defs = el('defs');
+defs.innerHTML = `<pattern id="grassTex" width="46" height="46" patternUnits="userSpaceOnUse">
+  <path d="M8 12l3-5 3 5M30 34l3-5 3 5" fill="none" stroke="#6fb869" stroke-width="2" stroke-linecap="round" opacity=".55"/></pattern>
+  <clipPath id="clipIsland"><path d="${smooth(ISLAND, true)}"/></clipPath>`;
+
+el('rect', { width:900, height:1200, fill:'#8fd3cf' });
+const waves = el('g', { class:'wave', fill:'none', stroke:'#c9eeea', 'stroke-width':4, 'stroke-linecap':'round', opacity:.8 });
+[[40,60],[700,50],[30,360],[848,170],[20,700],[858,700],[40,1010],[780,1120],[330,1160],[600,1160],[120,1140],[240,60]].forEach(([x, y]) =>
+  el('path', { d:`M${x} ${y}q10-9 20 0t20 0` }, waves));
+
+const islandD = smooth(ISLAND, true);
+el('path', { d:islandD, fill:'#bfe9e4', stroke:'#bfe9e4', 'stroke-width':34, 'stroke-linejoin':'round' });          // 浅瀬
+el('path', { d:islandD, fill:'#f3e2b3', stroke:'#f3e2b3', 'stroke-width':8, 'stroke-linejoin':'round' });            // 砂浜
+const grass = el('path', { d:islandD, fill:'#8fcf7f', stroke:'#f3e2b3', 'stroke-width':34, 'stroke-linejoin':'round', 'paint-order':'fill' });
+el('path', { d:islandD, fill:'url(#grassTex)', stroke:'#f3e2b3', 'stroke-width':34, 'stroke-linejoin':'round' });
+const plateauD = smooth(PLATEAU, true);
+el('path', { d:plateauD, fill:'#5f9a66', transform:'translate(0 13)' });                                            // 崖
+const plateau = el('path', { d:plateauD, fill:'#a9dc8f' });
+el('path', { d:plateauD, fill:'url(#grassTex)', opacity:.6 });
+
+// 道
+const pathEls = PATHS.map(p => {
+  const d = smooth(p);
+  el('path', { d, fill:'none', stroke:'#d9c38f', 'stroke-width':21, 'stroke-linecap':'round' });
+  return d;
+}).map(d => el('path', { d, fill:'none', stroke:'#f0deb0', 'stroke-width':15, 'stroke-linecap':'round' }));
+
+// 川・池
+const riverG = el('g', { 'clip-path':'url(#clipIsland)' });
+const riverEls = [RIVER_MAIN, RIVER_E, RIVER_W].map(p => {
+  const d = smooth(p);
+  el('path', { d, fill:'none', stroke:'#58b7c9', 'stroke-width':36, 'stroke-linecap':'round' }, riverG);
+  return d;
+}).map(d => el('path', { d, fill:'none', stroke:'#8fd3cf', 'stroke-width':28, 'stroke-linecap':'round' }));
+el('ellipse', { cx:466, cy:226, rx:46, ry:32, fill:'#8fd3cf', stroke:'#58b7c9', 'stroke-width':4 });
+el('path', { d:'M492 404l6 22M505 406l6 22M518 410l5 20', stroke:'#fff', 'stroke-width':4, 'stroke-linecap':'round', opacity:.9 }); // 滝
+
+// 橋
+const bridge = (x, y, rot) => {
+  const g = el('g', { transform:`translate(${x} ${y}) rotate(${rot})` });
+  el('rect', { x:-27, y:-13, width:54, height:26, rx:5, fill:'#c99a63', stroke:'#8a623a', 'stroke-width':3 }, g);
+  for (let i = -18; i <= 18; i += 9) el('path', { d:`M${i}-12v24`, stroke:'#8a623a', 'stroke-width':2, opacity:.6 }, g);
+};
+bridge(598, 590, 3); bridge(446, 868, 90); bridge(476, 336, -50);
+
+// 広場
+el('circle', { cx:430, cy:604, r:64, fill:'#e9d9b0', stroke:'#d2bd8a', 'stroke-width':4 });
+el('circle', { cx:430, cy:604, r:50, fill:'none', stroke:'#fff7df', 'stroke-width':3, 'stroke-dasharray':'3 11', 'stroke-linecap':'round' });
+// サークル広場の地面
+el('ellipse', { cx:655, cy:945, rx:74, ry:50, fill:'#e9d9b0', stroke:'#d2bd8a', 'stroke-width':4 });
+// 桟橋
+el('path', { d:'M450 1068v62', stroke:'#8a623a', 'stroke-width':26, 'stroke-linecap':'round' });
+el('path', { d:'M450 1068v62', stroke:'#c99a63', 'stroke-width':20, 'stroke-linecap':'round' });
+el('path', { d:'M422 1124h56', stroke:'#c99a63', 'stroke-width':16, 'stroke-linecap':'round' });
+const boat = el('g', { transform:'translate(492 1118)' });
+el('path', { d:'M-16 0h32l-6 12h-20z', fill:'#fff', stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, boat);
+el('path', { d:'M0 0v-24l14 18z', fill:'#d9534a', stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, boat);
+
+/* ---------- 木（決まった乱数で毎回同じ配置） ---------- */
+let seed = 20261112; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+const pt = (x, y) => { const p = svg.createSVGPoint(); p.x = x; p.y = y; return p; };
+const onLand = (x, y) => [[0,0],[42,0],[-42,0],[0,42],[0,-42]].every(([a, b]) => grass.isPointInFill(pt(x + a, y + b)));
+const sample = (path, step) => { const a = [], L = path.getTotalLength(); for (let s = 0; s <= L; s += step) { const p = path.getPointAtLength(s); a.push([p.x, p.y]); } return a; };
+const blocked = [];
+riverEls.forEach(p => sample(p, 14).forEach(q => blocked.push([...q, 36])));
+pathEls.forEach(p => sample(p, 14).forEach(q => blocked.push([...q, 24])));
+sample(plateau, 12).forEach(q => blocked.push([q[0], q[1] + 8, 26]));
+BUILDINGS.forEach(b => blocked.push([b.x, b.y, b.kind ? 84 : 62]));
+HOUSES.forEach(h => h.at.forEach(([x, y]) => blocked.push([x, y, 34])));
+blocked.push([430,604,78],[655,945,86],[466,226,58],[450,1040,40]);
+const treeG = el('g');
+const trees = [];
+for (let i = 0; i < 2600 && trees.length < 120; i++) {
+  const x = 60 + rnd() * 800, y = 90 + rnd() * 1020;
+  if (!onLand(x, y)) continue;
+  if (blocked.some(([bx, by, r]) => (bx - x) ** 2 + (by - y) ** 2 < r * r)) continue;
+  if (trees.some(([tx, ty]) => (tx - x) ** 2 + (ty - y) ** 2 < 30 * 30)) continue;
+  trees.push([x, y, rnd()]);
+}
+trees.sort((a, b) => a[1] - b[1]).forEach(([x, y, k]) => {
+  const g = el('g', { class:'tree', transform:`translate(${x} ${y})` }, treeG);
+  if (k < .12) { // 花
+    [[-7,0,'#ff9db0'],[5,-5,'#fff'],[7,6,'#ffd166']].forEach(([a, b, c]) => { el('circle', { cx:a, cy:b, r:4.5, fill:c, stroke:'#3b3226', 'stroke-width':1.2 }, g); });
+  } else if (k < .2) { // 岩
+    el('path', { d:'M-11 6q-3-12 6-13 12-2 14 9 0 6-10 6z', fill:'#b9b4a8', stroke:'#3b3226', 'stroke-width':2 }, g);
+  } else {
+    el('rect', { x:-3, y:0, width:6, height:11, rx:2, fill:'#8a623a' }, g);
+    el('circle', { cx:0, cy:-7, r:13, fill:k < .6 ? '#3f9a5a' : '#57ad5f', stroke:'#2f6f45', 'stroke-width':2.5 }, g);
+    el('circle', { cx:-4, cy:-11, r:3.5, fill:'#8fd08a', opacity:.8 }, g);
+  }
+});
+
+/* ---------- 建物 ---------- */
+const spots = el('g');
+const spot = (info, x, y) => {
+  const g = el('g', { class:'spot', tabindex:0, role:'button', 'data-dept':info.dept, 'aria-label':info.label }, spots);
+  g.info = info;
+  return el('g', { class:'bob', transform:`translate(${x} ${y})` }, g).parentNode && g;
+};
+const drawHouse = (g, x, y, color) => {
+  const b = el('g', { class:'bob' }, g), t = el('g', { transform:`translate(${x} ${y})` }, b);
+  el('ellipse', { cx:0, cy:15, rx:20, ry:5, fill:'#000', opacity:.12 }, t);
+  el('rect', { class:'hit', x:-15, y:-4, width:30, height:19, rx:3, fill:'#fff7e6', stroke:'#3b3226', 'stroke-width':2.5 }, t);
+  el('path', { d:'M-20-3l20-17 20 17z', fill:color, stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, t);
+  el('rect', { x:-4, y:4, width:8, height:11, rx:2, fill:'#8a623a' }, t);
+  el('rect', { x:-22, y:-24, width:44, height:44, fill:'transparent' }, t);
+};
+const drawBuilding = (g, b, color) => {
+  const bb = el('g', { class:'bob' }, g), t = el('g', { transform:`translate(${b.x} ${b.y})` }, bb);
+  if (b.kind === 'hall') {
+    el('ellipse', { cx:0, cy:30, rx:62, ry:9, fill:'#000', opacity:.12 }, t);
+    el('rect', { class:'hit', x:-52, y:-14, width:104, height:44, rx:5, fill:'#fff7e6', stroke:'#3b3226', 'stroke-width':3 }, t);
+    el('path', { d:'M-60-12l18-26h84l18 26z', fill:color, stroke:'#3b3226', 'stroke-width':3, 'stroke-linejoin':'round' }, t);
+    el('rect', { x:-15, y:-70, width:30, height:40, rx:3, fill:'#fff7e6', stroke:'#3b3226', 'stroke-width':3 }, t);
+    el('path', { d:'M-20-68l20-18 20 18z', fill:color, stroke:'#3b3226', 'stroke-width':3, 'stroke-linejoin':'round' }, t);
+    el('circle', { cx:0, cy:-52, r:8, fill:'#fff', stroke:'#3b3226', 'stroke-width':2.5 }, t);
+    el('path', { d:'M0-52v-5M0-52h4', stroke:'#3b3226', 'stroke-width':2, 'stroke-linecap':'round' }, t);
+    el('path', { d:'M-9 30v-20a9 9 0 0118 0v20z', fill:'#8a623a', stroke:'#3b3226', 'stroke-width':2.5 }, t);
+    [-36, 28].forEach(x => el('rect', { x, y:0, width:14, height:14, rx:2, fill:'#bfe6f2', stroke:'#3b3226', 'stroke-width':2 }, t));
+  } else {
+    el('ellipse', { cx:0, cy:24, rx:46, ry:7, fill:'#000', opacity:.12 }, t);
+    el('rect', { class:'hit', x:-36, y:-10, width:72, height:34, rx:4, fill:'#fff7e6', stroke:'#3b3226', 'stroke-width':3 }, t);
+    el('path', { d:'M-44-8l14-24h60l14 24z', fill:color, stroke:'#3b3226', 'stroke-width':3, 'stroke-linejoin':'round' }, t);
+    el('rect', { x:-7, y:2, width:14, height:22, rx:3, fill:'#8a623a', stroke:'#3b3226', 'stroke-width':2.5 }, t);
+    [-27, 15].forEach(x => el('rect', { x, y:0, width:12, height:12, rx:2, fill:'#bfe6f2', stroke:'#3b3226', 'stroke-width':2 }, t));
+    el('path', { d:'M26-30v-28', stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linecap':'round' }, t);       // 旗
+    el('path', { d:'M26-58l20 7-20 7z', fill:color, stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, t);
+  }
+};
+const mkSpot = info => { const g = el('g', { class:'spot', tabindex:0, role:'button', 'data-dept':info.dept, 'aria-label':info.label }, spots); g.info = info; return g; };
+
+const all = [];
+HOUSES.forEach(h => h.at.forEach(([x, y], i) => all.push({ y, draw: () => {
+  const d = DEPTS[h.dept], who = h.note || d.name;
+  const g = mkSpot({ dept:h.dept, label:`${who}メンバーの部屋 #${i + 1}`,
+    desc:'メンバー1人1人の部屋。本人が自由に飾れる。',
+    todo:['自分の担当タスク（やること／進行中／完了）','もらった「ありがとう」やバッジを飾る棚','自分の times へのポスト'] });
+  drawHouse(g, x, y, h.note ? '#9a7b62' : d.color);
+} })));
+BUILDINGS.forEach(b => all.push({ y: b.y + 20, draw: () => drawBuilding(mkSpot(b), b, DEPTS[b.dept].color) }));
+all.sort((a, b) => a.y - b.y).forEach(o => o.draw());
+
+// times通りの立て札
+const timesG = mkSpot(ZONES[0]);
+[[412,700],[466,742],[416,792],[474,922],[426,962],[476,1010]].forEach(([x, y], i) => {
+  const t = el('g', { transform:`translate(${x} ${y})` }, el('g', { class:'bob' }, timesG));
+  el('path', { d:'M0 0v12', stroke:'#8a623a', 'stroke-width':3, 'stroke-linecap':'round' }, t);
+  el('rect', { class:'hit', x:-9, y:-10, width:18, height:13, rx:2.5, fill:['#fff','#ffe9a8','#d6f0ff'][i % 3], stroke:'#3b3226', 'stroke-width':2 }, t);
+  el('path', { d:'M-5-6h10M-5-2h6', stroke:'#3b3226', 'stroke-width':1.5, 'stroke-linecap':'round', opacity:.6 }, t);
+  el('rect', { x:-18, y:-18, width:36, height:36, fill:'transparent' }, t);
+});
+// サークルのテント
+const circleG = mkSpot(ZONES[1]);
+[[616,930,'#ff9db0'],[660,916,'#7fd3c1'],[700,940,'#ffd166'],[640,968,'#a8b8ff'],[684,974,'#f4a261']].forEach(([x, y, c]) => {
+  const t = el('g', { transform:`translate(${x} ${y})` }, el('g', { class:'bob' }, circleG));
+  el('path', { class:'hit', d:'M-17 12l17-28 17 28z', fill:c, stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, t);
+  el('path', { d:'M-5 12l5-12 5 12z', fill:'#3b3226', opacity:.75 }, t);
+});
+const pierG = mkSpot(ZONES[2]);
+el('rect', { x:410, y:1060, width:110, height:84, fill:'transparent' }, pierG);
+
+// ラベル
+const labels = el('g');
+BUILDINGS.forEach(b => el('text', { class:'label', x:b.x, y:b.y + (b.kind ? 62 : 54) }, labels).textContent = b.label);
+ZONES.forEach(z => el('text', { class:'label s', x:z.x + (z.id === 'times' ? 62 : 0), y:z.y + (z.id === 'times' ? -120 : 0) }, labels).textContent = z.label);
+
+/* ---------- 操作 ---------- */
+const sheet = document.getElementById('sheet');
+const closeSheet = () => sheet.classList.remove('open');
+const open = info => {
+  const d = DEPTS[info.dept];
+  sheet.style.setProperty('--c', d.color);
+  sheet.innerHTML = `<button class="close" aria-label="閉じる">✕</button><span class="tag">${d.name}</span>
+    <h2>${info.label}</h2><p>${info.desc}</p><ul>${info.todo.map(t => `<li>${t}</li>`).join('')}</ul>
+    <div class="note">※ 試作のため中身は「ここに入れるもの」の案です。まだアクションボードとはつながっていません。</div>`;
+  sheet.classList.add('open');
+  sheet.querySelector('.close').onclick = closeSheet;
+};
+spots.addEventListener('click', e => { const g = e.target.closest('.spot'); if (g) open(g.info); });
+spots.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e.target.info); } });
+svg.addEventListener('click', e => { if (!e.target.closest('.spot')) closeSheet(); });
+
+const chips = document.getElementById('chips');
+let current = null;
+Object.entries(DEPTS).forEach(([id, d]) => {
+  const b = document.createElement('button');
+  b.className = 'chip'; b.style.setProperty('--c', d.color); b.setAttribute('aria-pressed', 'false');
+  b.innerHTML = `<i></i>${d.name}`;
+  b.onclick = () => {
+    current = current === id ? null : id;
+    chips.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(c === b && !!current)));
+    svg.classList.toggle('dim', !!current);
+    svg.querySelectorAll('.spot').forEach(s => s.classList.toggle('on', s.dataset.dept === current));
+  };
+  chips.appendChild(b);
+});
+
+const stage = document.getElementById('stage');
+let zoom = 1;
+const setZoom = z => {
+  const cx = (stage.scrollLeft + stage.clientWidth / 2) / stage.scrollWidth, cy = (stage.scrollTop + stage.clientHeight / 2) / stage.scrollHeight;
+  zoom = Math.max(1, Math.min(3, z));
+  const r = svg.getBoundingClientRect(), base = r.width / (parseFloat(svg.dataset.z) || 1);
+  svg.dataset.z = zoom;
+  svg.style.width = base * zoom + 'px'; svg.style.height = base * zoom * 4 / 3 + 'px'; svg.style.minHeight = '0';
+  svg.style.margin = '0 auto';
+  stage.scrollLeft = cx * stage.scrollWidth - stage.clientWidth / 2; stage.scrollTop = cy * stage.scrollHeight - stage.clientHeight / 2;
+};
+document.getElementById('zin').onclick = () => setZoom(zoom + .5);
+document.getElementById('zout').onclick = () => setZoom(zoom - .5);
+})();
+</script>
+</body>
+</html>
