@@ -45,6 +45,19 @@
   .spot { cursor:pointer; }
   .spot:focus { outline:none; }
   .spot:focus-visible .hit { stroke:#fff; stroke-width:4; }
+  #bag, #act {
+    position:fixed; z-index:3; bottom:calc(16px + env(safe-area-inset-bottom)); border:3px solid var(--line); background:var(--paper); color:var(--ink);
+    font:700 14px/1 inherit; padding:13px 16px; border-radius:99px; cursor:pointer; box-shadow:0 3px 0 rgba(59,50,38,.18);
+  }
+  #bag { left:12px; }
+  #act { left:50%; transform:translateX(-50%); background:#3b3226; color:#fff; border-color:#3b3226; max-width:52vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .me { pointer-events:none; }
+  .me.moving .walk { animation:hop .2s ease-in-out infinite; }
+  @keyframes hop { 50% { transform:translateY(-3px); } }
+  .slots { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
+  .slot { aspect-ratio:1; background:#fff; border:2px solid var(--line); border-radius:14px; padding:6px 4px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:2px; }
+  .slot.empty { background:#f3ead6; border-style:dashed; }
+  .slot b { font-size:20px; } .slot span { font-size:10px; font-weight:700; line-height:1.25; } .slot small { font-size:8px; color:#8a7a62; }
   .label { font-weight:800; font-size:25px; fill:var(--ink); stroke:#fffaf0; stroke-width:7; paint-order:stroke; stroke-linejoin:round; text-anchor:middle; pointer-events:none; }
   .label.m { font-size:22px; }
   .label.s { font-size:19px; stroke-width:6; }
@@ -74,11 +87,13 @@
 </head>
 <body>
 <header>
-  <h1>アクションボード島<small>マップ試作 v1</small></h1>
+  <h1>アクションボード島<small>試作 v2・地面をタップで歩く</small></h1>
   <div class="chips" id="chips"></div>
 </header>
 <div id="stage"><svg id="map" viewBox="0 0 900 1200" role="img" aria-label="アクションボード島のマップ"></svg></div>
 <div class="zoom"><button id="zin" aria-label="拡大">＋</button><button id="zout" aria-label="縮小">－</button></div>
+<button id="bag">持ち物</button>
+<button id="act" hidden></button>
 <div id="sheet" role="dialog" aria-live="polite"></div>
 
 <script>
@@ -248,10 +263,11 @@ for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
 }
 
 /* ============ アイコン ============ */
-const spots = el('g');
+const spots = el('g'), solid = [];
 const mkSpot = info => { const g = el('g', { class:'spot', tabindex:0, role:'button', 'data-dept':info.dept, 'aria-label':info.label }, spots); g.info = info; return g; };
 const inner = (g, x, y) => el('g', { transform:`translate(${x} ${y})` }, el('g', { class:'bob' }, g));
 const housePin = (g, x, y, color) => {
+  g.anchors = [[x, y]]; solid.push([x, y]);
   const t = inner(g, cx(x), cy(y));
   el('ellipse', { cx:0, cy:12, rx:11, ry:3.5, fill:'#000', opacity:.18 }, t);
   el('path', { class:'hit', d:'M-11 12v-13l11-10 11 10v13z', fill:color, stroke:'#fff', 'stroke-width':3, 'stroke-linejoin':'round' }, t);
@@ -259,6 +275,7 @@ const housePin = (g, x, y, color) => {
   el('rect', { x:-18, y:-18, width:36, height:36, fill:'transparent' }, t);
 };
 const bigPin = (g, b, d) => {
+  g.anchors = [[Math.floor(b.x), Math.floor(b.y)]]; solid.push(g.anchors[0]);
   const r = b.big ? 27 : 21, t = inner(g, cx(b.x), cy(b.y));
   el('ellipse', { cx:0, cy:r + 9, rx:r * .6, ry:5, fill:'#000', opacity:.2 }, t);
   el('path', { d:`M-9 ${r - 5}L0 ${r + 10}L9 ${r - 5}z`, fill:'#fff' }, t);
@@ -272,7 +289,7 @@ HOUSES.forEach(h => h.at.forEach(([x, y], i) => items.push({ y, draw: () => {
     desc:'メンバー1人1人の部屋。本人が自由に飾れる。',
     todo:['自分の担当タスク（やること／進行中／完了）','もらった「ありがとう」やバッジを飾る棚','自分の times へのポスト'] }), x, y, h.note ? '#8f745e' : d.color);
 } })));
-const timesG = mkSpot(ZONES.times);
+const timesG = mkSpot(ZONES.times); timesG.anchors = SIGNS;
 SIGNS.forEach(([x, y], i) => {
   const t = inner(timesG, cx(x), cy(y));
   el('path', { d:'M0 0v11', stroke:'#7d5732', 'stroke-width':3, 'stroke-linecap':'round' }, t);
@@ -280,13 +297,14 @@ SIGNS.forEach(([x, y], i) => {
   el('path', { d:'M-5-7h10M-5-3h6', stroke:'#3b3226', 'stroke-width':1.5, 'stroke-linecap':'round', opacity:.6 }, t);
   el('rect', { x:-16, y:-18, width:32, height:36, fill:'transparent' }, t);
 });
-const circleG = mkSpot(ZONES.circle);
+const circleG = mkSpot(ZONES.circle); circleG.anchors = TENTS.map(([x, y]) => [Math.round(x), Math.round(y)]);
 TENTS.forEach(([x, y, c]) => {
   const t = inner(circleG, cx(x), cy(y));
   el('path', { class:'hit', d:'M-15 11l15-25 15 25z', fill:c, stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, t);
   el('path', { d:'M-4 11l4-10 4 10z', fill:'#3b3226', opacity:.75 }, t);
 });
-el('rect', { x:cx(10) - 14, y:cy(38) - 10, width:140, height:100, fill:'transparent' }, mkSpot(ZONES.pier));
+const pierG = mkSpot(ZONES.pier); pierG.anchors = [[13, 38]];
+el('rect', { x:cx(10) - 14, y:cy(38) + 10, width:140, height:80, fill:'transparent' }, pierG);
 items.sort((a, b) => a.y - b.y).forEach(o => o.draw());
 BUILDINGS.forEach(b => bigPin(mkSpot(b), b, DEPTS[b.dept]));
 
@@ -304,11 +322,109 @@ const open = info => {
     <h2>${info.label}</h2><p>${info.desc}</p><ul>${info.todo.map(t => `<li>${t}</li>`).join('')}</ul>
     <div class="note">※ 試作のため中身は「ここに入れるもの」の案です。まだアクションボードとはつながっていません。</div>`;
   sheet.classList.add('open');
-  sheet.querySelector('.close').onclick = closeSheet;
+  sheet.querySelector('.close').onclick = () => { closeSheet(); refreshAct(); };
+  act.hidden = true;
 };
-spots.addEventListener('click', e => { const g = e.target.closest('.spot'); if (g) open(g.info); });
-spots.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e.target.info); } });
-svg.addEventListener('click', e => { if (!e.target.closest('.spot')) closeSheet(); });
+
+/* ============ 歩く・触れる（最小のゲーム部分） ============ */
+const block = grid(0); solid.forEach(([x, y]) => { if (block[y]) block[y][x] = 1; });
+const lvl = (x, y) => Math.max(1, at(tier, x, y));
+const walkable = (x, y) => x >= 0 && y >= 0 && x < W && y < H && land(x, y) && !at(block, x, y) && (!wet(x, y) || at(road, x, y));
+// 段差は道（階段）でしか越えられない。川は橋でしか渡れない
+const canStep = (ax, ay, bx, by) => walkable(bx, by) && (lvl(ax, ay) === lvl(bx, by) || (at(road, ax, ay) && at(road, bx, by)));
+const route = (from, goal) => {               // 幅優先探索で道順を求める
+  const key = (x, y) => y * W + x, prev = new Map([[key(...from), null]]), q = [from];
+  while (q.length) {
+    const [x, y] = q.shift();
+    if (goal(x, y)) { const out = []; for (let k = key(x, y); k !== null; k = prev.get(k)) out.unshift([k % W, Math.floor(k / W)]); return out; }
+    for (const [dx, dy] of [[0,1],[1,0],[0,-1],[-1,0]]) {
+      const nx = x + dx, ny = y + dy;
+      if (!prev.has(key(nx, ny)) && canStep(x, y, nx, ny)) { prev.set(key(nx, ny), key(x, y)); q.push([nx, ny]); }
+    }
+  }
+  return null;
+};
+const me = { x:13, y:37, path:[], then:null };
+const meG = el('g', { class:'me' }, svg);
+{ const b = el('g', { class:'walk' }, meG);
+  el('ellipse', { cx:0, cy:12, rx:10, ry:3.5, fill:'#000', opacity:.25 }, meG);
+  el('path', { d:'M-8 11q-2-15 8-15t8 15z', fill:'#ffd166', stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, b);
+  el('circle', { cy:-11, r:10, fill:'#ffe9d2', stroke:'#3b3226', 'stroke-width':2.5 }, b);
+  el('path', { d:'M-10-13q2-10 10-10t10 10q-9-5-20 0z', fill:'#5a4636', stroke:'#3b3226', 'stroke-width':2, 'stroke-linejoin':'round' }, b);
+  el('circle', { cx:-3.5, cy:-10, r:1.4, fill:'#3b3226' }, b); el('circle', { cx:3.5, cy:-10, r:1.4, fill:'#3b3226' }, b); }
+const place = () => meG.setAttribute('transform', `translate(${cx(me.x)} ${cy(me.y)})`);
+const stage = document.getElementById('stage');
+const follow = () => {
+  const r = meG.getBoundingClientRect(), s = stage.getBoundingClientRect(), m = 90;
+  if (r.left < s.left + m || r.right > s.right - m || r.top < s.top + m || r.bottom > s.bottom - m)
+    stage.scrollBy({ left:r.left + r.width / 2 - (s.left + s.width / 2), top:r.top + r.height / 2 - (s.top + s.height / 2), behavior:'smooth' });
+};
+const near = () => {                           // となりにある場所
+  let best = null, bd = 9;
+  svg.querySelectorAll('.spot').forEach(g => (g.anchors || []).forEach(([x, y]) => {
+    const d = Math.max(Math.abs(x - me.x), Math.abs(y - me.y)); if (d <= 1 && d < bd) { bd = d; best = g; }
+  }));
+  return best;
+};
+const act = document.getElementById('act');
+const refreshAct = () => {
+  const g = !me.path.length && !sheet.classList.contains('open') && near();
+  act.hidden = !g; if (g) { act.textContent = `▶ ${g.info.label}`; act.onclick = () => open(g.info); }
+};
+let t0 = 0;
+const tick = t => {
+  if (!me.path.length) { meG.classList.remove('moving'); const f = me.then; me.then = null; if (f) f(); refreshAct(); return; }
+  if (!t0) t0 = t;
+  const [nx, ny] = me.path[0], k = Math.min(1, (t - t0) / 95), fx = me.fx + (nx - me.fx) * k, fy = me.fy + (ny - me.fy) * k;
+  meG.setAttribute('transform', `translate(${cx(fx)} ${cy(fy)})`);
+  if (k === 1) { me.x = me.fx = nx; me.y = me.fy = ny; me.path.shift(); t0 = 0; follow(); }
+  requestAnimationFrame(tick);
+};
+const go = (path, then) => {
+  if (!path) return false;
+  const idle = !me.path.length;
+  me.path = path.slice(1); me.then = then || null; me.fx = me.x; me.fy = me.y;
+  closeSheet(); act.hidden = true; meG.classList.add('moving');
+  if (idle) { t0 = 0; requestAnimationFrame(tick); }
+  return true;
+};
+const visit = g => {
+  const A = g.anchors || [];
+  const ok = go(route([me.x, me.y], (x, y) => A.some(([ax, ay]) => Math.max(Math.abs(ax - x), Math.abs(ay - y)) <= 1)), () => open(g.info));
+  if (!ok) open(g.info);
+};
+svg.addEventListener('click', e => {
+  const g = e.target.closest('.spot');
+  if (g) return visit(g);
+  if (sheet.classList.contains('open')) return closeSheet(), refreshAct();
+  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
+  const tx = Math.floor((p.x - OX) / T), ty = Math.floor((p.y - OY) / T);
+  go(route([me.x, me.y], (x, y) => x === tx && y === ty));
+});
+addEventListener('keydown', e => {
+  const d = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0], w:[0,-1], s:[0,1], a:[-1,0], d:[1,0] }[e.key];
+  if (d) { e.preventDefault(); if (!me.path.length && canStep(me.x, me.y, me.x + d[0], me.y + d[1])) go([[me.x, me.y], [me.x + d[0], me.y + d[1]]]); }
+  else if ((e.key === 'Enter' || e.key === ' ') && !act.hidden) { e.preventDefault(); act.click(); }
+  else if (e.key === 'Escape') { closeSheet(); refreshAct(); }
+});
+place(); refreshAct();
+
+// 持ち物（＝自分のタスク）。中身はサンプル
+const BAG = [
+  { icon:'📝', name:'論点メモを書く', from:'政策立案の館' },
+  { icon:'📣', name:'告知文を確認する', from:'広報スタジオ' },
+  { icon:'🗓', name:'定例の日程を決める', from:'みんなの集会所' },
+];
+document.getElementById('bag').onclick = () => {
+  sheet.style.setProperty('--c', '#8f745e');
+  sheet.innerHTML = `<button class="close" aria-label="閉じる">✕</button><span class="tag">持ち物</span>
+    <h2>いま持っているタスク</h2><p>建物で受け取ったタスクを持ち歩き、終わったら建物に届ける、という使い方の案。</p>
+    <div class="slots">${Array.from({ length:8 }, (_, i) => BAG[i]
+      ? `<div class="slot"><b>${BAG[i].icon}</b><span>${BAG[i].name}</span><small>${BAG[i].from}</small></div>` : '<div class="slot empty"></div>').join('')}</div>
+    <div class="note">※ 中身はサンプルです。まだアクションボードとはつながっていません。</div>`;
+  sheet.classList.add('open'); act.hidden = true;
+  sheet.querySelector('.close').onclick = () => { closeSheet(); refreshAct(); };
+};
 
 const chips = document.getElementById('chips');
 let current = null;
@@ -325,7 +441,6 @@ Object.entries(DEPTS).forEach(([id, d]) => {
   chips.appendChild(b);
 });
 
-const stage = document.getElementById('stage');
 let zoom = 1, base = 0;
 const setZoom = z => {
   const fx = (stage.scrollLeft + stage.clientWidth / 2) / stage.scrollWidth, fy = (stage.scrollTop + stage.clientHeight / 2) / stage.scrollHeight;
@@ -333,6 +448,7 @@ const setZoom = z => {
   zoom = Math.max(1, Math.min(3, z));
   Object.assign(svg.style, { width:base * zoom + 'px', height:base * zoom * 4 / 3 + 'px', minHeight:'0', margin:'0 auto' });
   stage.scrollLeft = fx * stage.scrollWidth - stage.clientWidth / 2; stage.scrollTop = fy * stage.scrollHeight - stage.clientHeight / 2;
+  if (zoom > 1) follow();
 };
 document.getElementById('zin').onclick = () => setZoom(zoom + .5);
 document.getElementById('zout').onclick = () => setZoom(zoom - .5);
