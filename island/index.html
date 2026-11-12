@@ -107,6 +107,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
+import * as SkeletonUtils from './vendor/utils/SkeletonUtils.js';
 
 /* ============ 島の定義（マス目単位。ここを書き換えると島が変わる） ============ */
 const W = 32, H = 42, T = 28, OX = 2, OY = 12;        // 横32マス×縦42マス
@@ -122,12 +123,12 @@ const PLAZAS = [[11,18,5,5],[20,31,5,4]];
 const ROCKS  = [[2,5],[3,4],[29,7],[30,9],[29,22],[2,34],[3,37],[27,38],[29,36],[8,2],[15,1]];
 
 const DEPTS = {
-  all:    { name:'全体',     color:'#d9534a', mark:'全' },
-  policy: { name:'政策立案', color:'#e07a5f', mark:'政' },
+  all:    { name:'全体',     color:'#3fae6a', mark:'全' },
+  policy: { name:'政策立案', color:'#d9534a', mark:'政' },
   pr:     { name:'広報',     color:'#e0a21c', mark:'広' },
-  plan:   { name:'企画',     color:'#b06ac4', mark:'企' },
+  plan:   { name:'企画',     color:'#9b5fc0', mark:'企' },
   eng:    { name:'エンジニア', color:'#3f83d1', mark:'エ' },
-  office: { name:'事務局',   color:'#6f7f8e', mark:'事' },
+  office: { name:'事務局',   color:'#7a8794', mark:'事' },
   culture:{ name:'文化',     color:'#2f9e7c', mark:'文' },
 };
 const BUILDINGS = [   // x, y はマス目の座標
@@ -277,7 +278,7 @@ for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
   const fl = new THREE.InstancedMesh(new THREE.SphereGeometry(.08, 8, 6), new THREE.MeshLambertMaterial(), flowerAt.length * 3);
   flowerAt.forEach(([x, y, z], i) => [['#ff9db0', -.2, 0], ['#ffffff', .15, -.12], ['#ffd166', .1, .2]].forEach(([c, a, b], k) => {
     fl.setMatrixAt(i * 3 + k, M4.compose(new THREE.Vector3(x + a, y + .1, z + b), q, new THREE.Vector3(1, 1, 1))); fl.setColorAt(i * 3 + k, C.set(c)); }));
-  scene.add(fl); primDeco.push(fl); }
+  scene.add(fl); }
 
 /* ============ 建物・家 ============ */
 const spots = [], solid = [], spotAt = new Map(), key = (x, y) => y * W + x;
@@ -322,11 +323,11 @@ HOUSES.forEach(h => h.at.forEach(([x, y], i) => {
   const g = mkSpot({ dept:h.dept, label:`${who}メンバーの部屋 #${i + 1}`,
     desc:'メンバー1人1人の部屋。本人が自由に飾れる。',
     todo:['自分の担当タスク（やること／進行中／完了）','もらった「ありがとう」やバッジを飾る棚','自分の times へのポスト'] }, [[x, y]], wx(x), ground(x, y), wz(y));
-  house(g, h.note ? '#8f745e' : d.color); solid.push([x, y]);
+  house(g, h.note ? '#8f745e' : d.color); g.userData.kind = 'house'; g.userData.idx = i; g.userData.prim = [...g.children]; solid.push([x, y]);
 }));
 BUILDINGS.forEach(b => {
   const ax = Math.floor(b.x), ay = Math.floor(b.y), g = mkSpot(b, [[ax, ay]], wx(b.x), ground(ax, ay), wz(ay));
-  building(g, DEPTS[b.dept].color, b.big); solid.push([ax, ay]); if (b.big) solid.push([ax - 1, ay], [ax + 1, ay]);
+  building(g, DEPTS[b.dept].color, b.big); g.userData.kind = 'hall'; g.userData.prim = [...g.children]; solid.push([ax, ay]); if (b.big) solid.push([ax - 1, ay], [ax + 1, ay]);
   const l = label(b.label, b.big ? 1.25 : 1.05); l.position.set(0, b.big ? 3.3 : 2.35, 0); g.add(l);
 });
 const timesG = mkSpot(ZONES.times, SIGNS, 0, 0, 0);
@@ -341,32 +342,99 @@ TENTS.forEach(([x, y, c]) => { const t = mesh(new THREE.ConeGeometry(.55, .75, 4
 const pierG = mkSpot(ZONES.pier, [[13, 38]], 0, 0, 0);
 { const l = label(ZONES.pier.label, .9); l.position.set(wx(13), 1.5, wz(40.5)); pierG.add(l); }
 
-/* ============ 素材（Kenney Nature Kit・CC0）に差し替え ============
-   読み込みに失敗したら、上の手作りの形のまま動く。?plain を付けると素材を使わない */
-const MODELS = ['tree_default','tree_oak','tree_detailed','tree_fat','tree_pineDefaultA','tree_pineTallA','tree_small','plant_bush','plant_bushLarge','plant_bushSmall',
-  'flower_redA','flower_yellowA','flower_purpleA','flower_redB','flower_yellowB','flower_purpleB','rock_smallA','rock_smallB','rock_largeA','stone_smallA','tent_smallOpen','tent_detailedClosed','tent_smallClosed'];
-const useModels = async () => {
-  const loader = new GLTFLoader(), lib = {};
-  await Promise.all(MODELS.map(n => loader.loadAsync(`./models/${n}.glb`).then(g => { lib[n] = g.scene; })));
-  const FOLIAGE = new THREE.Color(.3, .72, .26);                       // この素材の木は青緑なので、島の草地に合う緑へ寄せる
-  const place = (name, x, y, z, height, rotY = 0) => {            // 高さをそろえ、足もとを地面に合わせる
-    const o = lib[name].clone(true), box = new THREE.Box3().setFromObject(o), k = height / Math.max(.01, box.max.y - box.min.y);
-    const g = new THREE.Group(); o.scale.setScalar(k); o.position.y = -box.min.y * k; g.add(o); g.position.set(x, y, z); g.rotation.y = rotY;
-    o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; if (m.material) { m.material = m.material.clone(); m.material.metalness = 0; m.material.roughness = 1; if (/^(tree|plant)_/.test(name)) m.material.color.copy(FOLIAGE); } } }); scene.add(g); return g;
+/* ============ 素材（KayKit・CC0）に差し替え ============
+   建物・家・住民・木・屋台・雲を読み込む。失敗したら上の手作りの形のまま動く。?plain で素材なし */
+const mixers = [], clouds = []; let playerAnim = null, bobAmp = .07;
+const useKit = async () => {
+  const gl = new GLTFLoader(), lib = {}, COLS = ['red', 'blue', 'green', 'yellow'];
+  const files = [
+    ...['home_A', 'home_B', 'market'].flatMap(n => COLS.map(c => `building_${n}_${c}.gltf`)),
+    'building_church_red.gltf', 'building_windmill_red.gltf', 'building_blacksmith_blue.gltf', 'building_barracks_blue.gltf', 'building_castle_green.gltf', 'building_well_blue.gltf',
+    ...['barrel', 'crate_A_small', 'wheelbarrow', 'sack', 'bucket_water', 'cloud_big', 'cloud_small'].map(n => n + '.gltf'),
+    ...['Tree_1_A', 'Tree_2_A', 'Tree_2_C', 'Tree_3_A', 'Tree_4_A', 'Bush_1_A', 'Bush_2_A', 'Bush_4_A', 'Rock_1_A', 'Rock_2_A', 'Rock_3_A'].map(n => n + '_Color1.gltf'),
+    'Knight.glb', 'Mage.glb', 'Rogue.glb', 'Rogue_Hooded.glb', 'Barbarian.glb', 'Ranger.glb', 'Rig_Medium_General.glb', 'Rig_Medium_MovementBasic.glb'];
+  await Promise.all(files.map(f => gl.loadAsync(`./models/kk/${f}`).then(g => { lib[f] = g; })));
+
+  // 屋根の色だけ入れ替えた絵柄（紫・灰色）を作る。赤→紫、青→灰色
+  const atlas = (() => { let t; lib['building_home_A_red.gltf'].scene.traverse(m => { if (m.isMesh && !t) t = m.material.map; }); return t; })();
+  const recolor = fn => {
+    const img = atlas.image, c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0); const d = x.getImageData(0, 0, c.width, c.height), p = d.data;
+    for (let i = 0; i < p.length; i += 4) {
+      const r = p[i] / 255, g = p[i + 1] / 255, b = p[i + 2] / 255, mx = Math.max(r, g, b), mn = Math.min(r, g, b), v = mx, sat = mx ? (mx - mn) / mx : 0;
+      let h = 0; if (mx !== mn) { const dd = mx - mn; h = mx === r ? ((g - b) / dd) % 6 : mx === g ? (b - r) / dd + 2 : (r - g) / dd + 4; h = (h * 60 + 360) % 360; }
+      const o = fn(h, sat, v); if (!o) continue;
+      const [H, S, V] = o, f = n => { const k = (n + H / 60) % 6; return V - V * S * Math.max(0, Math.min(k, 4 - k, 1)); };
+      p[i] = f(5) * 255; p[i + 1] = f(3) * 255; p[i + 2] = f(1) * 255;
+    }
+    x.putImageData(d, 0, 0); const t = new THREE.CanvasTexture(c); t.flipY = atlas.flipY; t.colorSpace = atlas.colorSpace; t.anisotropy = atlas.anisotropy; return t;
   };
-  const TREES = ['tree_default','tree_oak','tree_detailed','tree_fat','tree_pineDefaultA','tree_pineTallA','tree_small'], BUSH = ['plant_bush','plant_bushLarge','plant_bushSmall'];
-  const FLOWER = ['flower_redA','flower_yellowA','flower_purpleA','flower_redB','flower_yellowB','flower_purpleB'];
-  let k = 0, r2 = 1;
-  const rr = () => (r2 = (r2 * 16807) % 2147483647) / 2147483647;
-  treeAt.forEach(([x, y, z, s]) => { k++;
-    if (k % 4 === 0) place(BUSH[k % 3], x, y, z, .5 + rr() * .2, rr() * 6);
-    else place(TREES[k % TREES.length], x, y, z, (k % TREES.length === 5 ? 2.0 : 1.35) * (.85 + rr() * .3), rr() * 6); });
-  flowerAt.forEach(([x, y, z], i) => [[-.22, 0], [.18, -.14], [.08, .22]].forEach(([a, b], j) => place(FLOWER[(i * 3 + j) % 6], x + a, y, z + b, .3, rr() * 6)));
-  ROCKS.forEach(([x, y], i) => place(['rock_largeA','rock_smallA','stone_smallA','rock_smallB'][i % 4], wx(x), .1, wz(y), .5 + (i % 3) * .25, i));
-  TENTS.forEach(([x, y], i) => { const g = place(['tent_smallOpen','tent_detailedClosed','tent_smallClosed'][i % 3], wx(x), ground(22, 32), wz(y), .9, i * 1.3); circleG.add(g); });
-  primDeco.forEach(m => { m.visible = false; });
+  const PURPLE = recolor((h, s, v) => (h >= 340 || h <= 14) && s > .4 ? [282, s * .85, v * .95] : null);
+  const GREY = recolor((h, s, v) => h >= 185 && h <= 245 && s > .3 ? [h, s * .1, v * .98] : null);
+
+  // 高さまたは幅をそろえ、足もとを原点に置いた複製を作る
+  const make = (file, size, mode = 'w', tex = null) => {
+    const o = lib[file].scene.clone(true);
+    o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.material = m.material.clone(); m.material.metalness = 0; m.material.roughness = 1; if (tex) m.material.map = tex; } });
+    const b = new THREE.Box3().setFromObject(o), c = b.getCenter(new THREE.Vector3()), h = b.max.y - b.min.y;
+    const k = mode === 'h' ? size / h : size / Math.max(b.max.x - b.min.x, b.max.z - b.min.z), g = new THREE.Group();
+    o.scale.setScalar(k); o.position.set(-c.x * k, -b.min.y * k, -c.z * k); g.add(o); g.userData.h = h * k; return g;
+  };
+  const rr = (() => { let r = 7; return () => (r = (r * 16807) % 2147483647) / 2147483647; })();
+
+  // 部門ごとの建物と家
+  const KIT = {
+    policy:{ hall:'building_church_red.gltf',     house:['building_home_A_red.gltf', 'building_home_B_red.gltf'] },
+    pr:    { hall:'building_market_yellow.gltf',  house:['building_home_A_yellow.gltf', 'building_home_B_yellow.gltf'] },
+    eng:   { hall:'building_blacksmith_blue.gltf',house:['building_home_A_blue.gltf', 'building_home_B_blue.gltf'] },
+    plan:  { hall:'building_windmill_red.gltf',   house:['building_home_A_red.gltf', 'building_home_B_red.gltf'], tex:PURPLE },
+    office:{ hall:'building_barracks_blue.gltf',  house:['building_home_A_blue.gltf', 'building_home_B_blue.gltf'], tex:GREY },
+    all:   { hall:'building_castle_green.gltf',   house:['building_home_A_green.gltf', 'building_home_B_green.gltf'] },
+  };
+  spots.forEach(g => {
+    const u = g.userData; if (!u.kind) return; const k = KIT[u.info.dept], isHouse = u.kind === 'house';
+    const m = make(isHouse ? k.house[u.idx % 2] : k.hall, isHouse ? 1.25 : u.info.big ? 3.1 : u.info.dept === 'plan' ? 1.9 : 2.1, 'w', k.tex || null);
+    m.rotation.y = isHouse ? ((u.idx * 37) % 5 - 2) * .07 : 0; g.add(m); u.prim.forEach(q => { q.visible = false; });
+    const lab = g.children.find(c => c.isSprite); if (lab) lab.position.y = m.userData.h + .5;
+  });
+  // サークル広場：色ちがいの屋台
+  circleG.children.forEach(c => { if (c.isMesh) c.visible = false; });
+  [['building_market_red.gltf', null], ['building_market_blue.gltf', null], ['building_market_green.gltf', null], ['building_market_yellow.gltf', null], ['building_market_red.gltf', PURPLE]].forEach(([f, t], i) => {
+    const [x, y] = TENTS[i], m = make(f, 1.35, 'w', t); m.position.set(wx(x), ground(22, 32), wz(y)); m.rotation.y = (i - 2) * .25; circleG.add(m); });
+  // 木・茂み・岩
+  const TREES = ['Tree_1_A_Color1.gltf', 'Tree_2_A_Color1.gltf', 'Tree_2_C_Color1.gltf', 'Tree_3_A_Color1.gltf', 'Tree_4_A_Color1.gltf'], BUSH = ['Bush_1_A_Color1.gltf', 'Bush_2_A_Color1.gltf', 'Bush_4_A_Color1.gltf'];
+  const put = (m, x, y, z, yaw = 0) => { m.position.set(x, y, z); m.rotation.y = yaw; scene.add(m); return m; };
+  let n = 0;
+  treeAt.forEach(([x, y, z]) => { n++;
+    if (n % 4 === 0) put(make(BUSH[n % 3], .5 + rr() * .15, 'h'), x, y, z, rr() * 6);
+    else put(make(TREES[n % 5], (.95 + rr() * .4), 'h'), x, y, z, rr() * 6); });
+  ROCKS.forEach(([x, y], i) => put(make(['Rock_1_A_Color1.gltf', 'Rock_2_A_Color1.gltf', 'Rock_3_A_Color1.gltf'][i % 3], .85, 'w'), wx(x), .05, wz(y), i));
+  primDeco.forEach(q => { q.visible = false; });
+  // 小物（建物のそば）
+  [['barrel.gltf', 15.6, 11.2, .32], ['crate_A_small.gltf', 13.4, 11.4, .34], ['wheelbarrow.gltf', 24.2, 5.4, .5], ['crate_A_small.gltf', 26.6, 5.6, .34], ['sack.gltf', 7.2, 29.8, .3], ['barrel.gltf', 5.0, 29.6, .32],
+   ['barrel.gltf', 22.4, 24.6, .32], ['bucket_water.gltf', 9.6, 19.4, .3], ['building_well_blue.gltf', 15.2, 21.4, .8], ['crate_A_small.gltf', 11.6, 21.4, .34]]
+    .forEach(([f, x, y, size], i) => put(make(f, size, 'w'), wx(x), ground(x, y), wz(y), i * 1.7));
+  // 雲
+  for (let i = 0; i < 7; i++) {
+    const c = make(i % 2 ? 'cloud_big.gltf' : 'cloud_small.gltf', 3 + rr() * 2.5, 'w'); c.traverse(m => { if (m.isMesh) { m.castShadow = false; m.receiveShadow = false; } });
+    put(c, -34 + rr() * 68, 11 + rr() * 4, -26 + rr() * 52, rr() * 6); c.userData.v = .25 + rr() * .35; clouds.push(c);
+  }
+  // 住民と主人公（骨入りのキャラクター）
+  const clips = [...lib['Rig_Medium_General.glb'].animations, ...lib['Rig_Medium_MovementBasic.glb'].animations], clip = nm => clips.find(a => a.name === nm);
+  const spawn = (file, height) => {
+    const o = SkeletonUtils.clone(lib[file].scene);
+    o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; m.material = m.material.clone(); m.material.metalness = 0; m.material.roughness = 1; } });
+    const b = new THREE.Box3().setFromObject(o), k = height / (b.max.y - b.min.y); o.scale.setScalar(k); o.position.y = -b.min.y * k;
+    const g = new THREE.Group(); g.add(o); const mx = new THREE.AnimationMixer(o); mixers.push(mx); return { g, mx };
+  };
+  [['Knight.glb', 15.5, 21.8, 3.4], ['Rogue_Hooded.glb', 24.6, 6.6, 3.0], ['Barbarian.glb', 7.6, 30.4, 3.8], ['Ranger.glb', 25.6, 24.6, 2.6], ['Rogue.glb', 12.0, 11.6, 3.2]].forEach(([f, x, y, yaw]) => {
+    const c = spawn(f, .92), a = c.mx.clipAction(clip('Idle_A')); a.time = rr() * 3; a.play(); put(c.g, wx(x), ground(x, y), wz(y), yaw); });
+  const pl = spawn('Mage.glb', .98); meG.children.forEach(q => { q.visible = false; }); meG.add(pl.g);
+  const idle = pl.mx.clipAction(clip('Idle_A')), walk = pl.mx.clipAction(clip('Walking_A')); walk.timeScale = 1.7; idle.play(); let cur = idle;
+  playerAnim = moving => { const nx = moving ? walk : idle; if (cur !== nx) { nx.reset().fadeIn(.15).play(); cur.fadeOut(.15); cur = nx; } };
+  bobAmp = 0;
 };
-if (!new URLSearchParams(location.search).has('plain')) useModels().catch(e => console.warn('素材の読み込みに失敗。手作りの形のまま表示します', e));
+window.__kit = 'loading';
 
 /* ============ 歩く・触れる ============ */
 const block = grid(0); solid.forEach(([x, y]) => { if (block[y]) block[y][x] = 1; });
@@ -556,10 +624,12 @@ const clock = new THREE.Clock(), center = new THREE.Vector3(0, 0, 0), want = new
 const frame = () => {
   const dt = Math.min(.25, clock.getDelta()), now = clock.elapsedTime;
   if (intro.on) runIntro(dt);
+  mixers.forEach(m => m.update(dt)); if (playerAnim) playerAnim(me.path.length > 0);
+  clouds.forEach(c => { c.position.x += dt * c.userData.v; if (c.position.x > 40) c.position.x = -40; });
   if (me.path.length) {
-    const [nx, ny] = me.path[0]; me.t = Math.min(1, me.t + dt / .11);
+    const [nx, ny] = me.path[0]; me.t = Math.min(1, me.t + dt / .16);
     const px = me.fx + (nx - me.fx) * me.t, py = me.fy + (ny - me.fy) * me.t;
-    meG.position.set(wx(px), ground(me.fx, me.fy) + (ground(nx, ny) - ground(me.fx, me.fy)) * me.t + Math.abs(Math.sin(now * 16)) * .07, wz(py));
+    meG.position.set(wx(px), ground(me.fx, me.fy) + (ground(nx, ny) - ground(me.fx, me.fy)) * me.t + Math.abs(Math.sin(now * 16)) * bobAmp, wz(py));
     meG.rotation.y = Math.atan2(nx - me.fx, ny - me.fy);
     if (me.t === 1) { sfx.step(); me.x = me.fx = nx; me.y = me.fy = ny; me.t = 0; me.path.shift();
       if (!me.path.length) { const f = me.then; me.then = null; if (f) f(); refreshAct(); } }
@@ -579,6 +649,7 @@ const frame = () => {
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 };
+if (!new URLSearchParams(location.search).has('plain')) useKit().then(() => { window.__kit = 'ready'; }).catch(e => { window.__kit = 'failed'; console.warn('素材の読み込みに失敗。手作りの形のまま表示します', e); });
 refreshAct(); frame();
 window.__island = { me, cam, spots, visit, intro };
 </script>
