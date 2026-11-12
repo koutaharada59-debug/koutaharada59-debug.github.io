@@ -103,8 +103,10 @@
 <button id="act" hidden></button>
 <div id="sheet" role="dialog" aria-live="polite"></div>
 
+<script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
 <script type="module">
-import * as THREE from './vendor/three.module.min.js';
+import * as THREE from 'three';
+import { GLTFLoader } from './vendor/GLTFLoader.js';
 
 /* ============ 島の定義（マス目単位。ここを書き換えると島が変わる） ============ */
 const W = 32, H = 42, T = 28, OX = 2, OY = 12;        // 横32マス×縦42マス
@@ -240,8 +242,9 @@ for (let y = 1; y < H; y++) for (let x = 0; x < W; x++) {
   }
 }
 // 岩場・桟橋・船
+const primDeco = [];                       // 素材が読めたら隠す、手作りの代用品
 const rockM = mat('#66737f');
-ROCKS.forEach(([x, y], i) => { const r = mesh(new THREE.DodecahedronGeometry(.75 + (i % 3) * .15), rockM, scene, wx(x), .15, wz(y)); r.rotation.set(i, i * 2, i * 3); r.scale.y = .7; });
+ROCKS.forEach(([x, y], i) => { const r = mesh(new THREE.DodecahedronGeometry(.75 + (i % 3) * .15), rockM, scene, wx(x), .15, wz(y)); r.rotation.set(i, i * 2, i * 3); r.scale.y = .7; primDeco.push(r); });
 mesh(new THREE.BoxGeometry(.7, .12, 3.2), wood, scene, wx(13), .3, wz(39.6));
 mesh(new THREE.BoxGeometry(2, .12, .7), wood, scene, wx(13), .3, wz(41));
 for (const [a, b] of [[12.75,38.5],[13.25,38.5],[12.2,41],[13.8,41],[12.75,40],[13.25,40]]) mesh(new THREE.CylinderGeometry(.07, .07, .7), woodD, scene, wx(a), .05, wz(b));
@@ -270,11 +273,11 @@ for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     leaf.setMatrixAt(i, M4.compose(new THREE.Vector3(x, y + .5 + .34 * s, z), q, new THREE.Vector3(s, s, s)));
     leaf2.setMatrixAt(i, M4.compose(new THREE.Vector3(x, y + .5 + .72 * s, z), q, new THREE.Vector3(s, s, s)));
   });
-  for (const m of [trunk, leaf, leaf2]) { m.castShadow = true; m.receiveShadow = true; scene.add(m); }
+  for (const m of [trunk, leaf, leaf2]) { m.castShadow = true; m.receiveShadow = true; scene.add(m); primDeco.push(m); }
   const fl = new THREE.InstancedMesh(new THREE.SphereGeometry(.08, 8, 6), new THREE.MeshLambertMaterial(), flowerAt.length * 3);
   flowerAt.forEach(([x, y, z], i) => [['#ff9db0', -.2, 0], ['#ffffff', .15, -.12], ['#ffd166', .1, .2]].forEach(([c, a, b], k) => {
     fl.setMatrixAt(i * 3 + k, M4.compose(new THREE.Vector3(x + a, y + .1, z + b), q, new THREE.Vector3(1, 1, 1))); fl.setColorAt(i * 3 + k, C.set(c)); }));
-  scene.add(fl); }
+  scene.add(fl); primDeco.push(fl); }
 
 /* ============ 建物・家 ============ */
 const spots = [], solid = [], spotAt = new Map(), key = (x, y) => y * W + x;
@@ -333,10 +336,37 @@ SIGNS.forEach(([x, y], i) => {
 });
 { const l = label(ZONES.times.label, .9); l.position.set(wx(13), ground(13, 30) + 1.5, wz(30)); timesG.add(l); }
 const circleG = mkSpot(ZONES.circle, TENTS.map(([x, y]) => [Math.round(x), Math.round(y)]), 0, 0, 0);
-TENTS.forEach(([x, y, c]) => { const t = mesh(new THREE.ConeGeometry(.55, .75, 4), mat(c, { flatShading:true }), circleG, wx(x), ground(22, 32) + .37, wz(y)); t.rotation.y = Math.PI / 4; });
+TENTS.forEach(([x, y, c]) => { const t = mesh(new THREE.ConeGeometry(.55, .75, 4), mat(c, { flatShading:true }), circleG, wx(x), ground(22, 32) + .37, wz(y)); t.rotation.y = Math.PI / 4; primDeco.push(t); });
 { const l = label(ZONES.circle.label, .9); l.position.set(wx(22), ground(22, 32) + 1.7, wz(32.5)); circleG.add(l); }
 const pierG = mkSpot(ZONES.pier, [[13, 38]], 0, 0, 0);
 { const l = label(ZONES.pier.label, .9); l.position.set(wx(13), 1.5, wz(40.5)); pierG.add(l); }
+
+/* ============ 素材（Kenney Nature Kit・CC0）に差し替え ============
+   読み込みに失敗したら、上の手作りの形のまま動く。?plain を付けると素材を使わない */
+const MODELS = ['tree_default','tree_oak','tree_detailed','tree_fat','tree_pineDefaultA','tree_pineTallA','tree_small','plant_bush','plant_bushLarge','plant_bushSmall',
+  'flower_redA','flower_yellowA','flower_purpleA','flower_redB','flower_yellowB','flower_purpleB','rock_smallA','rock_smallB','rock_largeA','stone_smallA','tent_smallOpen','tent_detailedClosed','tent_smallClosed'];
+const useModels = async () => {
+  const loader = new GLTFLoader(), lib = {};
+  await Promise.all(MODELS.map(n => loader.loadAsync(`./models/${n}.glb`).then(g => { lib[n] = g.scene; })));
+  const FOLIAGE = new THREE.Color(.3, .72, .26);                       // この素材の木は青緑なので、島の草地に合う緑へ寄せる
+  const place = (name, x, y, z, height, rotY = 0) => {            // 高さをそろえ、足もとを地面に合わせる
+    const o = lib[name].clone(true), box = new THREE.Box3().setFromObject(o), k = height / Math.max(.01, box.max.y - box.min.y);
+    const g = new THREE.Group(); o.scale.setScalar(k); o.position.y = -box.min.y * k; g.add(o); g.position.set(x, y, z); g.rotation.y = rotY;
+    o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; if (m.material) { m.material = m.material.clone(); m.material.metalness = 0; m.material.roughness = 1; if (/^(tree|plant)_/.test(name)) m.material.color.copy(FOLIAGE); } } }); scene.add(g); return g;
+  };
+  const TREES = ['tree_default','tree_oak','tree_detailed','tree_fat','tree_pineDefaultA','tree_pineTallA','tree_small'], BUSH = ['plant_bush','plant_bushLarge','plant_bushSmall'];
+  const FLOWER = ['flower_redA','flower_yellowA','flower_purpleA','flower_redB','flower_yellowB','flower_purpleB'];
+  let k = 0, r2 = 1;
+  const rr = () => (r2 = (r2 * 16807) % 2147483647) / 2147483647;
+  treeAt.forEach(([x, y, z, s]) => { k++;
+    if (k % 4 === 0) place(BUSH[k % 3], x, y, z, .5 + rr() * .2, rr() * 6);
+    else place(TREES[k % TREES.length], x, y, z, (k % TREES.length === 5 ? 2.0 : 1.35) * (.85 + rr() * .3), rr() * 6); });
+  flowerAt.forEach(([x, y, z], i) => [[-.22, 0], [.18, -.14], [.08, .22]].forEach(([a, b], j) => place(FLOWER[(i * 3 + j) % 6], x + a, y, z + b, .3, rr() * 6)));
+  ROCKS.forEach(([x, y], i) => place(['rock_largeA','rock_smallA','stone_smallA','rock_smallB'][i % 4], wx(x), .1, wz(y), .5 + (i % 3) * .25, i));
+  TENTS.forEach(([x, y], i) => { const g = place(['tent_smallOpen','tent_detailedClosed','tent_smallClosed'][i % 3], wx(x), ground(22, 32), wz(y), .9, i * 1.3); circleG.add(g); });
+  primDeco.forEach(m => { m.visible = false; });
+};
+if (!new URLSearchParams(location.search).has('plain')) useModels().catch(e => console.warn('素材の読み込みに失敗。手作りの形のまま表示します', e));
 
 /* ============ 歩く・触れる ============ */
 const block = grid(0); solid.forEach(([x, y]) => { if (block[y]) block[y][x] = 1; });
@@ -538,7 +568,7 @@ const frame = () => {
     const on = current && g.userData.info.dept === current, k = !current ? 1 : on ? 1 : .45;
     if (intro.on) { const p = popIn(intro.t, i); g.scale.set(p, p, p); } else g.scale.lerp(want.set(k, k, k), .2); g.position.y = g.userData.base + (on ? Math.abs(Math.sin(now * 4)) * .18 : 0);
   });
-  { const k = Math.max(1, cam.dist / 20) ** .8; labels.forEach(l => l.scale.set(l.userData.size[0] * k, l.userData.size[1] * k, 1)); }
+  { const k = Math.max(1, cam.dist / 20) ** .5; labels.forEach(l => l.scale.set(l.userData.size[0] * k, l.userData.size[1] * k, 1)); }
   boat.position.y = .12 + Math.sin(now * 1.6) * .03; boat.rotation.z = Math.sin(now * 1.2) * .05;
   // カメラ：近いときは自分を追い、引くと島全体を映す
   const far = THREE.MathUtils.smoothstep(cam.dist, 30, 70);
