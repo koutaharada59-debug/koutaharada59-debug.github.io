@@ -57,6 +57,13 @@
   .slot { aspect-ratio:1; background:#fff; border:2px solid var(--line); border-radius:14px; padding:6px 4px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:2px; }
   .slot.empty { background:#f3ead6; border-style:dashed; }
   .slot b { font-size:20px; } .slot span { font-size:10px; font-weight:700; line-height:1.25; } .slot small { font-size:8px; color:#8a7a62; }
+  #title { position:fixed; inset:0; padding-bottom:42vh; z-index:5; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+    pointer-events:none; opacity:0; transition:opacity .9s; text-align:center; }
+  #title.show { opacity:1; }
+  #title b { font-size:clamp(30px, 9vw, 60px); letter-spacing:.08em; color:#fff; text-shadow:0 3px 0 rgba(59,50,38,.35), 0 0 24px rgba(59,50,38,.35); }
+  #title span { font-size:13px; font-weight:700; color:#fff; background:rgba(59,50,38,.45); padding:5px 12px; border-radius:99px; }
+  body.intro header, body.intro #bag, body.intro #act, body.intro .zoom { opacity:0; pointer-events:none; }
+  header, #bag, .zoom { transition:opacity .6s; }
   .label { font-weight:800; font-size:25px; fill:var(--ink); stroke:#fffaf0; stroke-width:7; paint-order:stroke; stroke-linejoin:round; text-anchor:middle; pointer-events:none; }
   .label.m { font-size:22px; }
   .label.s { font-size:19px; stroke-width:6; }
@@ -90,7 +97,8 @@
   <div class="chips" id="chips"></div>
 </header>
 <div id="stage"><canvas id="map" aria-label="アクションボード島"></canvas></div>
-<div class="zoom"><button id="zin" aria-label="近づく">＋</button><button id="zout" aria-label="引く">－</button></div>
+<div id="title"><b>アクションボード島</b><span>タップでスキップ</span></div>
+<div class="zoom"><button id="snd" aria-label="音のオン・オフ">♪</button><button id="zin" aria-label="近づく">＋</button><button id="zout" aria-label="引く">－</button></div>
 <button id="bag">持ち物</button>
 <button id="act" hidden></button>
 <div id="sheet" role="dialog" aria-live="polite"></div>
@@ -178,7 +186,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene(); scene.background = new THREE.Color('#bfe9f2'); scene.fog = new THREE.Fog('#bfe9f2', 70, 150);
 const camera = new THREE.PerspectiveCamera(34, 1, .1, 400);
-scene.add(new THREE.HemisphereLight('#ffffff', '#9ac79a', 1.5));
+const hemi = new THREE.HemisphereLight('#ffffff', '#9ac79a', 1.5); scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff3d6', 2.1);
 sun.position.set(-18, 34, 14); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left:-28, right:28, top:28, bottom:-28, near:1, far:90 }); sun.shadow.bias = -.0008;
@@ -363,7 +371,7 @@ const near = () => {
   return best;
 };
 const refreshAct = () => {
-  const g = !me.path.length && !sheet.classList.contains('open') && near();
+  const g = !intro.on && !me.path.length && !sheet.classList.contains('open') && near();
   act.hidden = !g; if (g) { act.textContent = `▶ ${g.userData.info.label}`; act.onclick = () => open(g.userData.info); }
 };
 const open = info => {
@@ -372,8 +380,8 @@ const open = info => {
   sheet.innerHTML = `<button class="close" aria-label="閉じる">✕</button><span class="tag">${d.name}</span>
     <h2>${info.label}</h2><p>${info.desc}</p><ul>${info.todo.map(t => `<li>${t}</li>`).join('')}</ul>
     <div class="note">※ 試作のため中身は「ここに入れるもの」の案です。まだアクションボードとはつながっていません。</div>`;
-  sheet.classList.add('open'); act.hidden = true;
-  sheet.querySelector('.close').onclick = () => { closeSheet(); refreshAct(); };
+  sheet.classList.add('open'); act.hidden = true; sfx.open();
+  sheet.querySelector('.close').onclick = () => { closeSheet(); sfx.close(); refreshAct(); };
 };
 const go = (path, then) => {
   if (!path) return false;
@@ -387,17 +395,78 @@ const visit = g => {
   if (!go(route([me.x, me.y], (x, y) => A.some(([ax, ay]) => Math.max(Math.abs(ax - x), Math.abs(ay - y)) <= 1)), () => open(g.userData.info))) open(g.userData.info);
 };
 
+/* ============ 効果音（すべてコードで合成。音声ファイルなし） ============ */
+let AC = null, master = null, muted = false;
+try { muted = localStorage.getItem('island-mute') === '1'; } catch {}
+const sndBtn = document.getElementById('snd');
+const showMute = () => { sndBtn.textContent = muted ? '×' : '♪'; if (master) master.gain.value = muted ? 0 : 1; };
+const audio = () => {                          // 最初のタップで音を有効にする（ブラウザの決まり）
+  if (AC) return AC;
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; }
+  master = AC.createGain(); master.connect(AC.destination); showMute();
+  const n = AC.sampleRate * 2, buf = AC.createBuffer(1, n, AC.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const src = AC.createBufferSource(), lp = AC.createBiquadFilter(), g = AC.createGain(), lfo = AC.createOscillator(), lg = AC.createGain();
+  src.buffer = buf; src.loop = true; lp.type = 'lowpass'; lp.frequency.value = 420; g.gain.value = .035;      // 波の音
+  lfo.frequency.value = .14; lg.gain.value = .025; lfo.connect(lg); lg.connect(g.gain);
+  src.connect(lp); lp.connect(g); g.connect(master); src.start(); lfo.start();
+  return AC;
+};
+const tone = (f0, f1, dur, vol, type = 'sine', delay = 0) => {
+  if (!AC) return; const t = AC.currentTime + delay, o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + .02);
+};
+const sfx = {
+  step:  () => tone(170 + Math.random() * 40, 90, .07, .09, 'triangle'),
+  open:  () => { tone(660, 660, .16, .08); tone(880, 880, .22, .08, 'sine', .1); tone(1320, 1320, .3, .05, 'sine', .2); },
+  close: () => tone(520, 300, .1, .06),
+  pop:   () => tone(420, 760, .09, .05, 'triangle'),
+};
+sndBtn.onclick = () => { audio(); muted = !muted; try { localStorage.setItem('island-mute', muted ? '1' : '0'); } catch {} showMute(); if (!muted) sfx.pop(); };
+showMute();
+
+/* ============ オープニング（秒単位のタイムライン） ============
+   0.0–1.5秒  夜明け色の空。真上寄りの遠景に島の名前が出る
+   1.5–5.0秒  カメラが回りながら降りる。空が朝から昼へ。家と建物が順に立ち上がる
+   5.0–7.0秒  船着き場の自分まで寄る。名前が消えて操作ボタンが出る                 */
+const HOLD = Number(new URLSearchParams(location.search).get('introAt')) || 0;
+const INTRO = 7, titleEl = document.getElementById('title');
+const intro = { t:0, on:!new URLSearchParams(location.search).has('nointro') && !matchMedia('(prefers-reduced-motion: reduce)').matches };
+if (intro.on) { document.body.classList.add('intro'); titleEl.classList.add('show'); }
+const ease = t => t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t), span = (t, a, b) => ease((t - a) / (b - a));
+const DAWN = new THREE.Color('#ffc9a8'), DAY = new THREE.Color('#bfe9f2'), SUN0 = new THREE.Color('#ff9f6b'), SUN1 = new THREE.Color('#fff3d6'),
+  HEMI0 = new THREE.Color('#ffb8a0'), HEMI1 = new THREE.Color('#ffffff'), SEA0 = new THREE.Color('#e3a58f'), SEA1 = new THREE.Color('#6fc7c6');
+const popIn = (t, i) => { const k = (t - 1.6 - i * .055) / .45; return k <= 0 ? 0 : k >= 1 ? 1 : 1 + 1.4 * Math.sin(k * Math.PI) * (1 - k) * .5 - (1 - k) ** 3; };
+let popped = -1;
+const runIntro = dt => {
+  intro.t = HOLD || intro.t + dt; const t = intro.t;        // ?introAt=3.2 でその時点のコマに固定（確認・書き出し用）
+  cam.dist = 104 - 56 * span(t, 1.5, 5) - 31 * span(t, 5, 7);
+  cam.az = -.7 + .55 * span(t, 1.5, 5) + .15 * span(t, 5, 7);
+  scene.background.copy(DAWN).lerp(DAY, span(t, 1.5, 5)); scene.fog.color.copy(scene.background);
+  sun.color.copy(SUN0).lerp(SUN1, span(t, 1.5, 5)); sun.intensity = 1.5 + .6 * span(t, 1.5, 5);
+  hemi.color.copy(HEMI0).lerp(HEMI1, span(t, 1.5, 5)); sea.material.color.copy(SEA0).lerp(SEA1, span(t, 1.5, 5));
+  labels.forEach(l => { l.material.opacity = span(t, 5, 6); });
+  const n = Math.min(spots.length - 1, Math.floor((t - 1.6) / .055)); if (n > popped && n % 4 === 0) sfx.pop(); popped = Math.max(popped, n);
+  if (t > 3.9) titleEl.classList.remove('show');
+  if (t >= INTRO) { intro.on = false; cam.dist = 17; cam.az = 0; scene.background.copy(DAY); scene.fog.color.copy(DAY); sun.color.copy(SUN1); sun.intensity = 2.1; hemi.color.copy(HEMI1); sea.material.color.copy(SEA1); labels.forEach(l => { l.material.opacity = 1; });
+    document.body.classList.remove('intro'); titleEl.classList.remove('show'); refreshAct(); }
+};
+
 /* ============ カメラと入力 ============ */
 const cam = { dist:17, az:0, target:new THREE.Vector3(wx(13), 0, wz(37)) };
 const resize = () => { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); };
 addEventListener('resize', resize); resize();
 const zoomBy = k => { cam.dist = Math.max(8, Math.min(95, cam.dist * k)); };
-document.getElementById('zin').onclick = () => zoomBy(.7);
-document.getElementById('zout').onclick = () => zoomBy(1.45);
+document.getElementById('zin').onclick = () => { audio(); sfx.pop(); zoomBy(.7); };
+document.getElementById('zout').onclick = () => { audio(); sfx.pop(); zoomBy(1.45); };
 canvas.addEventListener('wheel', e => { e.preventDefault(); zoomBy(e.deltaY > 0 ? 1.1 : .9); }, { passive:false });
 const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
 const tap = (cx, cy) => {
-  if (sheet.classList.contains('open')) { closeSheet(); refreshAct(); return; }
+  audio();
+  if (intro.on) { intro.t = INTRO; return; }
+  if (sheet.classList.contains('open')) { closeSheet(); sfx.close(); refreshAct(); return; }
   const r = canvas.getBoundingClientRect(); ptr.set((cx - r.left) / r.width * 2 - 1, -(cy - r.top) / r.height * 2 + 1);
   ray.setFromCamera(ptr, camera);
   const hitS = ray.intersectObjects(spots, true).find(h => !h.object.isSprite);
@@ -456,17 +525,18 @@ document.getElementById('bag').onclick = () => {
 const clock = new THREE.Clock(), center = new THREE.Vector3(0, 0, 0), want = new THREE.Vector3();
 const frame = () => {
   const dt = Math.min(.25, clock.getDelta()), now = clock.elapsedTime;
+  if (intro.on) runIntro(dt);
   if (me.path.length) {
     const [nx, ny] = me.path[0]; me.t = Math.min(1, me.t + dt / .11);
     const px = me.fx + (nx - me.fx) * me.t, py = me.fy + (ny - me.fy) * me.t;
     meG.position.set(wx(px), ground(me.fx, me.fy) + (ground(nx, ny) - ground(me.fx, me.fy)) * me.t + Math.abs(Math.sin(now * 16)) * .07, wz(py));
     meG.rotation.y = Math.atan2(nx - me.fx, ny - me.fy);
-    if (me.t === 1) { me.x = me.fx = nx; me.y = me.fy = ny; me.t = 0; me.path.shift();
+    if (me.t === 1) { sfx.step(); me.x = me.fx = nx; me.y = me.fy = ny; me.t = 0; me.path.shift();
       if (!me.path.length) { const f = me.then; me.then = null; if (f) f(); refreshAct(); } }
   } else meG.position.set(wx(me.x), ground(me.x, me.y), wz(me.y));
-  spots.forEach(g => {                                    // しぼりこみ中は該当だけ弾ませ、ほかは縮める
+  spots.forEach((g, i) => {                                    // しぼりこみ中は該当だけ弾ませ、ほかは縮める
     const on = current && g.userData.info.dept === current, k = !current ? 1 : on ? 1 : .45;
-    g.scale.lerp(want.set(k, k, k), .2); g.position.y = g.userData.base + (on ? Math.abs(Math.sin(now * 4)) * .18 : 0);
+    if (intro.on) { const p = popIn(intro.t, i); g.scale.set(p, p, p); } else g.scale.lerp(want.set(k, k, k), .2); g.position.y = g.userData.base + (on ? Math.abs(Math.sin(now * 4)) * .18 : 0);
   });
   { const k = Math.max(1, cam.dist / 20) ** .8; labels.forEach(l => l.scale.set(l.userData.size[0] * k, l.userData.size[1] * k, 1)); }
   boat.position.y = .12 + Math.sin(now * 1.6) * .03; boat.rotation.z = Math.sin(now * 1.2) * .05;
@@ -480,7 +550,7 @@ const frame = () => {
   requestAnimationFrame(frame);
 };
 refreshAct(); frame();
-window.__island = { me, cam, spots, visit };
+window.__island = { me, cam, spots, visit, intro };
 </script>
 </body>
 </html>
