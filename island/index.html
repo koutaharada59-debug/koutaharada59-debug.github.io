@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>アクションボード島（マップ試作）</title>
+<title>アクションボード島（3D試作）</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏝️</text></svg>">
 <style>
   :root {
@@ -32,9 +32,8 @@
   .chip i { width:10px; height:10px; border-radius:50%; background:var(--c); }
   .chip[aria-pressed="true"] { border-color:var(--c); background:color-mix(in srgb, var(--c) 16%, #fff); }
 
-  #stage { flex:1; overflow:auto; position:relative; -webkit-overflow-scrolling:touch; }
-  #map { display:block; width:100%; height:auto; min-height:100%; }
-  @media (min-aspect-ratio: 1/1) { #map { width:auto; height:100%; margin:0 auto; } }
+  #stage { flex:1; position:relative; min-height:0; }
+  #map { display:block; width:100%; height:100%; touch-action:none; cursor:pointer; }
 
   .zoom { position:fixed; right:12px; bottom:calc(16px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:6px; z-index:3; }
   .zoom button {
@@ -87,24 +86,17 @@
 </head>
 <body>
 <header>
-  <h1>アクションボード島<small>試作 v2・地面をタップで歩く</small></h1>
+  <h1>アクションボード島<small>3D試作・タップで歩く</small></h1>
   <div class="chips" id="chips"></div>
 </header>
-<div id="stage"><svg id="map" viewBox="0 0 900 1200" role="img" aria-label="アクションボード島のマップ"></svg></div>
-<div class="zoom"><button id="zin" aria-label="拡大">＋</button><button id="zout" aria-label="縮小">－</button></div>
+<div id="stage"><canvas id="map" aria-label="アクションボード島"></canvas></div>
+<div class="zoom"><button id="zin" aria-label="近づく">＋</button><button id="zout" aria-label="引く">－</button></div>
 <button id="bag">持ち物</button>
 <button id="act" hidden></button>
 <div id="sheet" role="dialog" aria-live="polite"></div>
 
-<script>
-(() => {
-const NS = 'http://www.w3.org/2000/svg';
-const svg = document.getElementById('map');
-const el = (name, attrs = {}, parent = svg) => {
-  const n = document.createElementNS(NS, name);
-  for (const k in attrs) n.setAttribute(k, attrs[k]);
-  parent.appendChild(n); return n;
-};
+<script type="module">
+import * as THREE from './vendor/three.module.min.js';
 
 /* ============ 島の定義（マス目単位。ここを書き換えると島が変わる） ============ */
 const W = 32, H = 42, T = 28, OX = 2, OY = 12;        // 横32マス×縦42マス
@@ -170,6 +162,7 @@ const ZONES = {
     todo:['はじめての人向けの案内','今日やることのサマリー'] },
 };
 
+
 /* ============ マス目データを作る ============ */
 const grid = v => Array.from({ length:H }, () => Array(W).fill(v));
 const paint = (g, rects, v) => rects.forEach(([x, y, w, h]) => { for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (g[j] && i >= 0 && i < W) g[j][i] = v; });
@@ -177,163 +170,174 @@ const tier = grid(0), sand = grid(0), water = grid(0), road = grid(0), plaza = g
 paint(tier, GRASS, 1); paint(tier, TIER2, 2); paint(tier, TIER3, 3);
 paint(sand, BEACH, 1); paint(water, WATER, 1); paint(road, ROADS, 1); paint(plaza, PLAZAS, 1);
 const at = (g, x, y) => (g[y] && g[y][x]) || 0;
-// 条件に合うマスをまとめて1本のパスにする
-const tiles = (test, inset = 0) => {     // 外側の辺だけ inset ぶん内側に寄せる
-  let d = '';
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    if (!test(x, y)) continue;
-    const l = test(x - 1, y) ? 0 : inset, r = test(x + 1, y) ? 0 : inset, t = test(x, y - 1) ? 0 : inset, b = test(x, y + 1) ? 0 : inset;
-    d += `M${OX + x * T + l} ${OY + y * T + t}h${T - l - r}v${T - t - b}h${-(T - l - r)}z`;
-  }
-  return d;
-};
-const layer = (test, fill, grow, extra = {}, inset = 0) => el('path', { d:tiles(test, inset), fill, stroke:fill, 'stroke-width':grow, 'stroke-linejoin':'round', ...extra });
-const cx = x => OX + (x + .5) * T, cy = y => OY + (y + .5) * T;
 
-/* ============ 地形を描く ============ */
-el('rect', { width:900, height:1200, fill:'#79c9c4' });
-const waves = el('g', { class:'wave', fill:'none', stroke:'#b9e8e2', 'stroke-width':4, 'stroke-linecap':'round', opacity:.8 });
-[[30,40],[700,30],[10,300],[850,150],[4,640],[856,560],[30,1040],[780,1130],[300,1170],[560,1172],[120,1150],[240,30],[850,1000]].forEach(([x, y]) => el('path', { d:`M${x} ${y}q10-9 20 0t20 0` }, waves));
+/* ============ 3Dの舞台 ============ */
+const canvas = document.getElementById('map'), stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#bfe9f2'); scene.fog = new THREE.Fog('#bfe9f2', 70, 150);
+const camera = new THREE.PerspectiveCamera(34, 1, .1, 400);
+scene.add(new THREE.HemisphereLight('#ffffff', '#9ac79a', 1.5));
+const sun = new THREE.DirectionalLight('#fff3d6', 2.1);
+sun.position.set(-18, 34, 14); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left:-28, right:28, top:28, bottom:-28, near:1, far:90 }); sun.shadow.bias = -.0008;
+scene.add(sun);
 
 const land = (x, y) => at(tier, x, y) > 0 || at(sand, x, y);
-layer(land, '#a9e0d9', 62);                                             // 浅瀬
-layer(land, '#f4e3b5', 30);                                             // 砂浜
-ROCKS.forEach(([x, y], i) => {                                          // 岩場
-  const g = el('g', { transform:`translate(${cx(x)} ${cy(y)}) rotate(${i * 47})` });
-  el('path', { d:'M-17 4q-4-17 10-19 17-3 21 11 2 12-14 13-15 1-17-5z', fill:'#5d6b78' }, g);
-  el('path', { d:'M-9-4q4-8 13-6', stroke:'#8795a1', 'stroke-width':3, 'stroke-linecap':'round', fill:'none' }, g);
-});
-const COL = ['', '#6dbb63', '#8ccf73', '#abe08a'], CLIFF = ['', '', '#4c8f52', '#69a85c'];
-layer((x, y) => at(tier, x, y) >= 1, COL[1], 12);
-for (const n of [2, 3]) {
-  layer((x, y) => at(tier, x, y) >= n, CLIFF[n], 10, { transform:'translate(0 11)' });   // 崖
-  layer((x, y) => at(tier, x, y) >= n, COL[n], 10);
-}
-// 広場・道
-layer((x, y) => at(plaza, x, y), '#ead9ae', 8, { stroke:'#d6c08c' }, 2);
-layer((x, y) => at(plaza, x, y), '#ead9ae', 2, {}, 4);
-const isRoad = (x, y) => at(road, x, y) && at(tier, x, y) > 0 && !at(water, x, y);
-layer(isRoad, '#e9d6a6', 6, {}, 6);
-// 坂（道が段をまたぐところ）
-for (let y = 1; y < H; y++) for (let x = 0; x < W; x++) {
-  if (!isRoad(x, y) || !isRoad(x, y - 1) || at(tier, x, y - 1) <= at(tier, x, y)) continue;
-  const g = el('g', { transform:`translate(${OX + x * T} ${OY + y * T})` });
-  el('rect', { x:3, y:-3, width:T - 6, height:18, rx:3, fill:'#cdb37a' }, g);
-  for (const k of [1, 6, 11]) el('path', { d:`M5 ${k}h${T - 10}`, stroke:'#f6ead0', 'stroke-width':2.5, 'stroke-linecap':'round' }, g);
-}
-// 川・池
 const wet = (x, y) => at(water, x, y);
-layer((x, y) => wet(x, y) && at(tier, x, y) > 0, '#3fa3b8', 7, {}, 3);        // 岸
-layer((x, y) => wet(x, y) && land(x, y), '#8fdcd8', 2, {}, 4);
-layer((x, y) => wet(x, y) && !at(tier, x, y), '#79c9c4', 2, {}, 3);          // 河口は海の色に
-for (let y = 0; y < H - 1; y++) for (let x = 0; x < W; x++)                   // 滝
-  if (wet(x, y) && wet(x, y + 1) && at(tier, x, y) > at(tier, x, y + 1) && at(tier, x, y + 1) > 0) {
-    el('rect', { x:OX + x * T + 4, y:OY + (y + 1) * T - 2, width:T - 8, height:15, fill:'#5fb9cb' });
-    for (const k of [8, 14, 20]) el('path', { d:`M${OX + x * T + k} ${OY + (y + 1) * T}v10`, stroke:'#fff', 'stroke-width':3, 'stroke-linecap':'round' });
-  }
-// 橋（道と川が重なるマス）
-for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-  if (!(at(road, x, y) && wet(x, y) && at(tier, x, y) > 0)) continue;
-  const horiz = at(road, x - 1, y) || at(road, x + 1, y);
-  const g = el('g', { transform:`translate(${cx(x)} ${cy(y)}) rotate(${horiz ? 0 : 90})` });
-  el('rect', { x:-T / 2 - 3, y:-10, width:T + 6, height:20, rx:3, fill:'#c4925a', stroke:'#7d5732', 'stroke-width':2.5 }, g);
-  for (const k of [-8, 0, 8]) el('path', { d:`M${k}-9v18`, stroke:'#7d5732', 'stroke-width':1.6, opacity:.6 }, g);
-}
-// 桟橋と船
-el('rect', { x:cx(13) - 10, y:cy(38) - 6, width:20, height:T * 2.6, rx:4, fill:'#c4925a', stroke:'#7d5732', 'stroke-width':2.5 });
-el('rect', { x:cx(13) - 26, y:cy(40) + 6, width:52, height:16, rx:4, fill:'#c4925a', stroke:'#7d5732', 'stroke-width':2.5 });
-const boat = el('g', { transform:`translate(${cx(11)} ${cy(40) + 8})` });
-el('path', { d:'M-16 0h32l-6 12h-20z', fill:'#fff', stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, boat);
-el('path', { d:'M0 0v-24l14 18z', fill:'#d9534a', stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, boat);
+const HT = [.14, .4, 1.05, 1.7];                                   // 砂浜・1段目・2段目・3段目の高さ
+const wx = x => x - W / 2 + .5, wz = y => y - H / 2 + .5;
+const bridge = (x, y) => wet(x, y) && at(road, x, y) && at(tier, x, y) > 0;
+const ground = (x, y) => HT[at(tier, Math.round(x), Math.round(y))] ?? HT[0];   // 歩く高さ
+const mat = (color, o = {}) => new THREE.MeshLambertMaterial({ color, ...o });
+const mesh = (geo, m, parent, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; o.receiveShadow = true; parent.add(o); return o; };
 
-/* ============ 木（決まった乱数で毎回同じ配置） ============ */
+// 海
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat('#6fc7c6')); sea.rotation.x = -Math.PI / 2; sea.receiveShadow = true; scene.add(sea);
+// 地面：1マス＝1つの箱。上面は明るく、側面（崖）は暗く
+const boxG = new THREE.BoxGeometry(1, 1, 1);
+{ const c = new Float32Array(72); for (let i = 0; i < 24; i++) { const top = i >= 8 && i < 12, v = top ? 1 : .68; c.set([v, v * (top ? 1 : .94), v * (top ? 1 : .86)], i * 3); }
+  boxG.setAttribute('color', new THREE.BufferAttribute(c, 3)); }
+const cells = []; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (land(x, y)) cells.push([x, y]);
+const terrain = new THREE.InstancedMesh(boxG, new THREE.MeshLambertMaterial({ vertexColors:true }), cells.length);
+terrain.receiveShadow = true; terrain.castShadow = true;
+const GRASSC = ['', '#7ccb6c', '#93d67a', '#aee28c'], M4 = new THREE.Matrix4(), C = new THREE.Color();
+cells.forEach(([x, y], i) => {
+  const t = at(tier, x, y), w = wet(x, y), top = (HT[t] ?? HT[0]) - (w ? .2 : 0);
+  M4.compose(new THREE.Vector3(wx(x), (top - 1.5) / 2, wz(y)), new THREE.Quaternion(), new THREE.Vector3(1, top + 1.5, 1));
+  terrain.setMatrixAt(i, M4);
+  C.set(w ? (t ? '#7fd9de' : '#6fc7c6') : !t ? '#f4e3b5' : at(plaza, x, y) ? '#ecdcb2' : at(road, x, y) ? '#e6d2a0' : GRASSC[t]);
+  if (t && !w && !at(road, x, y) && !at(plaza, x, y) && (x + y) % 2) C.multiplyScalar(.965);       // うっすら市松
+  terrain.setColorAt(i, C);
+});
+scene.add(terrain);
+// 浅瀬
+{ const coast = cells.filter(([x, y]) => [[1,0],[-1,0],[0,1],[0,-1]].some(([a, b]) => !land(x + a, y + b)));
+  const m = new THREE.InstancedMesh(new THREE.CircleGeometry(1.7, 20), new THREE.MeshBasicMaterial({ color:'#a6e3df' }), coast.length);
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+  coast.forEach(([x, y], i) => m.setMatrixAt(i, M4.compose(new THREE.Vector3(wx(x), .02, wz(y)), q, new THREE.Vector3(1, 1, 1)))); scene.add(m); }
+// 階段・橋
+const wood = mat('#c4925a'), woodD = mat('#8a623a'), stone = mat('#d8c391');
+for (let y = 1; y < H; y++) for (let x = 0; x < W; x++) {
+  if (at(road, x, y) && at(road, x, y - 1) && land(x, y) && at(tier, x, y - 1) > at(tier, x, y) && !wet(x, y)) {
+    const lo = ground(x, y), d = ground(x, y - 1) - lo;
+    for (let k = 0; k < 4; k++) mesh(new THREE.BoxGeometry(.8, d * (4 - k) / 4, .25), stone, scene, wx(x), lo + d * (4 - k) / 8, wz(y) - .375 + k * .25);
+  }
+  if (bridge(x, y)) {
+    const horiz = at(road, x - 1, y) || at(road, x + 1, y), g = new THREE.Group(); g.position.set(wx(x), ground(x, y), wz(y)); g.rotation.y = horiz ? 0 : Math.PI / 2; scene.add(g);
+    mesh(new THREE.BoxGeometry(1.02, .1, .8), wood, g, 0, -.02, 0);
+    for (const s of [-.4, .4]) mesh(new THREE.BoxGeometry(1.02, .06, .06), woodD, g, 0, .22, s);
+    for (const s of [-.4, .4]) for (const e of [-.45, .45]) mesh(new THREE.BoxGeometry(.07, .28, .07), woodD, g, e, .1, s);
+  }
+}
+// 岩場・桟橋・船
+const rockM = mat('#66737f');
+ROCKS.forEach(([x, y], i) => { const r = mesh(new THREE.DodecahedronGeometry(.75 + (i % 3) * .15), rockM, scene, wx(x), .15, wz(y)); r.rotation.set(i, i * 2, i * 3); r.scale.y = .7; });
+mesh(new THREE.BoxGeometry(.7, .12, 3.2), wood, scene, wx(13), .3, wz(39.6));
+mesh(new THREE.BoxGeometry(2, .12, .7), wood, scene, wx(13), .3, wz(41));
+for (const [a, b] of [[12.75,38.5],[13.25,38.5],[12.2,41],[13.8,41],[12.75,40],[13.25,40]]) mesh(new THREE.CylinderGeometry(.07, .07, .7), woodD, scene, wx(a), .05, wz(b));
+const boat = new THREE.Group(); boat.position.set(wx(11.2), .12, wz(41)); scene.add(boat);
+mesh(new THREE.BoxGeometry(1.3, .28, .6), mat('#ffffff'), boat); mesh(new THREE.CylinderGeometry(.03, .03, 1), woodD, boat, 0, .6, 0);
+{ const s = mesh(new THREE.ConeGeometry(.42, .8, 3), mat('#d9534a'), boat, .18, .7, 0); s.scale.z = .08; }
+
+// 木
 let seed = 20261112; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
 const busy = grid(0);
-HOUSES.forEach(h => h.at.forEach(([x, y]) => paint(busy, [[x, y - 1, 1, 2]], 1)));
-BUILDINGS.forEach(b => paint(busy, [[Math.floor(b.x) - 1, Math.floor(b.y) - 2, 3, 5]], 1));
+HOUSES.forEach(h => h.at.forEach(([x, y]) => paint(busy, [[x, y, 1, 1]], 1)));
+BUILDINGS.forEach(b => paint(busy, [[Math.floor(b.x) - 1, Math.floor(b.y) - 1, 3, 3]], 1));
 SIGNS.forEach(([x, y]) => paint(busy, [[x, y, 1, 1]], 1));
-const treeG = el('g');
+const treeAt = [], flowerAt = [];
 for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-  const r = rnd(), jx = (rnd() - .5) * 8, jy = (rnd() - .5) * 8;
-  if (!at(tier, x, y) || wet(x, y) || at(road, x, y) || at(plaza, x, y) || at(busy, x, y)) continue;
-  if (at(tier, x, y + 1) !== at(tier, x, y) || r > .34) continue;
-  const g = el('g', { class:'tree', transform:`translate(${cx(x) + jx} ${cy(y) + jy})` }, treeG);
-  if (r < .04) [[-6,2,'#ff9db0'],[5,-3,'#fff'],[4,7,'#ffd166']].forEach(([a, b, c]) => el('circle', { cx:a, cy:b, r:3.6, fill:c, stroke:'#2f6f45', 'stroke-width':1 }, g));
-  else { el('circle', { cx:0, cy:3, r:10, fill:'#2c7a48', opacity:.35 }, g); el('circle', { r:10, fill:'#2f8a4e' }, g); el('circle', { cx:-3, cy:-3, r:4, fill:'#58b06a' }, g); }
+  const r = rnd(), jx = (rnd() - .5) * .3, jz = (rnd() - .5) * .3;
+  if (!at(tier, x, y) || wet(x, y) || at(road, x, y) || at(plaza, x, y) || at(busy, x, y) || r > .34) continue;
+  (r < .05 ? flowerAt : treeAt).push([wx(x) + jx, ground(x, y), wz(y) + jz, .8 + rnd() * .5]);
 }
+{ const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.07, .1, .5, 6), mat('#8a623a'), treeAt.length);
+  const leaf = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.42, 1), mat('#3d9a57', { flatShading:true }), treeAt.length);
+  const leaf2 = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.3, 1), mat('#55b266', { flatShading:true }), treeAt.length);
+  const q = new THREE.Quaternion();
+  treeAt.forEach(([x, y, z, s], i) => {
+    trunk.setMatrixAt(i, M4.compose(new THREE.Vector3(x, y + .25, z), q, new THREE.Vector3(1, 1, 1)));
+    leaf.setMatrixAt(i, M4.compose(new THREE.Vector3(x, y + .5 + .34 * s, z), q, new THREE.Vector3(s, s, s)));
+    leaf2.setMatrixAt(i, M4.compose(new THREE.Vector3(x, y + .5 + .72 * s, z), q, new THREE.Vector3(s, s, s)));
+  });
+  for (const m of [trunk, leaf, leaf2]) { m.castShadow = true; m.receiveShadow = true; scene.add(m); }
+  const fl = new THREE.InstancedMesh(new THREE.SphereGeometry(.08, 8, 6), new THREE.MeshLambertMaterial(), flowerAt.length * 3);
+  flowerAt.forEach(([x, y, z], i) => [['#ff9db0', -.2, 0], ['#ffffff', .15, -.12], ['#ffd166', .1, .2]].forEach(([c, a, b], k) => {
+    fl.setMatrixAt(i * 3 + k, M4.compose(new THREE.Vector3(x + a, y + .1, z + b), q, new THREE.Vector3(1, 1, 1))); fl.setColorAt(i * 3 + k, C.set(c)); }));
+  scene.add(fl); }
 
-/* ============ アイコン ============ */
-const spots = el('g'), solid = [];
-const mkSpot = info => { const g = el('g', { class:'spot', tabindex:0, role:'button', 'data-dept':info.dept, 'aria-label':info.label }, spots); g.info = info; return g; };
-const inner = (g, x, y) => el('g', { transform:`translate(${x} ${y})` }, el('g', { class:'bob' }, g));
-const housePin = (g, x, y, color) => {
-  g.anchors = [[x, y]]; solid.push([x, y]);
-  const t = inner(g, cx(x), cy(y));
-  el('ellipse', { cx:0, cy:12, rx:11, ry:3.5, fill:'#000', opacity:.18 }, t);
-  el('path', { class:'hit', d:'M-11 12v-13l11-10 11 10v13z', fill:color, stroke:'#fff', 'stroke-width':3, 'stroke-linejoin':'round' }, t);
-  el('rect', { x:-3, y:3, width:6, height:9, rx:1.5, fill:'#fff' }, t);
-  el('rect', { x:-18, y:-18, width:36, height:36, fill:'transparent' }, t);
+/* ============ 建物・家 ============ */
+const spots = [], solid = [], spotAt = new Map(), key = (x, y) => y * W + x;
+const cream = mat('#fff5e0'), doorM = mat('#8a623a'), glass = mat('#bfe6f2');
+const mkSpot = (info, anchors, x, y, z) => {
+  const g = new THREE.Group(); g.position.set(x, y, z); g.userData = { info, anchors, base:y }; scene.add(g); spots.push(g);
+  anchors.forEach(([a, b]) => spotAt.set(key(a, b), g)); return g;
 };
-const bigPin = (g, b, d) => {
-  g.anchors = [[Math.floor(b.x), Math.floor(b.y)]]; solid.push(g.anchors[0]);
-  const r = b.big ? 27 : 21, t = inner(g, cx(b.x), cy(b.y));
-  el('ellipse', { cx:0, cy:r + 9, rx:r * .6, ry:5, fill:'#000', opacity:.2 }, t);
-  el('path', { d:`M-9 ${r - 5}L0 ${r + 10}L9 ${r - 5}z`, fill:'#fff' }, t);
-  el('circle', { class:'hit', r, fill:d.color, stroke:'#fff', 'stroke-width':5 }, t);
-  el('text', { y:r * .36, 'text-anchor':'middle', 'font-size':r, 'font-weight':800, fill:'#fff' }, t).textContent = d.mark;
+const roofG = new THREE.ConeGeometry(.56, .58, 4); roofG.rotateY(Math.PI / 4);
+const house = (g, color) => {
+  mesh(new THREE.BoxGeometry(.66, .44, .6), cream, g, 0, .22, 0);
+  mesh(roofG, mat(color), g, 0, .73, 0);
+  mesh(new THREE.BoxGeometry(.16, .26, .04), doorM, g, 0, .13, .31);
 };
-const items = [];
-HOUSES.forEach(h => h.at.forEach(([x, y], i) => items.push({ y, draw: () => {
+const building = (g, color, big) => {
+  const w = big ? 2.4 : 1.4, h = big ? 1 : .8, d = big ? 1.3 : 1, cm = mat(color);
+  mesh(new THREE.BoxGeometry(w, h, d), cream, g, 0, h / 2, 0);
+  const r = mesh(roofG, cm, g, 0, h + .36, 0); r.scale.set(w * 1.02, 1.25, d * 1.05);
+  mesh(new THREE.BoxGeometry(.3, .5, .05), doorM, g, 0, .25, d / 2 + .01);
+  for (const s of [-1, 1]) mesh(new THREE.BoxGeometry(.24, .24, .05), glass, g, s * w * .3, h * .55, d / 2 + .01);
+  if (big) {
+    mesh(new THREE.BoxGeometry(.6, 1.1, .6), cream, g, 0, h + .75, 0);
+    const t = mesh(roofG, cm, g, 0, h + 1.62, 0); t.scale.set(.8, 1.1, .8);
+    mesh(new THREE.CylinderGeometry(.17, .17, .05, 20).rotateX(Math.PI / 2), mat('#ffffff'), g, 0, h + .95, .31);
+  } else {
+    mesh(new THREE.CylinderGeometry(.03, .03, 1.1), doorM, g, w / 2 - .12, h + .55, -d / 2 + .12);
+    mesh(new THREE.BoxGeometry(.42, .26, .03), cm, g, w / 2 + .12, h + .95, -d / 2 + .12);
+  }
+};
+const labels = [];
+const label = (text, size = 1) => {              // 文字は板に描いて常にこちらを向かせる
+  const c = document.createElement('canvas'), k = c.getContext('2d'), f = '800 56px "Hiragino Maru Gothic ProN","Zen Maru Gothic","Yu Gothic","Noto Sans JP",sans-serif';
+  k.font = f; c.width = Math.ceil(k.measureText(text).width) + 40; c.height = 84;
+  k.font = f; k.textAlign = 'center'; k.textBaseline = 'middle'; k.lineJoin = 'round'; k.lineWidth = 14; k.strokeStyle = '#fffaf0'; k.strokeText(text, c.width / 2, 44);
+  k.fillStyle = '#3b3226'; k.fillText(text, c.width / 2, 44);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:t, depthTest:false, transparent:true })); s.renderOrder = 10;
+  s.userData.size = [c.width / 84 * .62 * size, .62 * size]; labels.push(s); return s;
+};
+HOUSES.forEach(h => h.at.forEach(([x, y], i) => {
   const d = DEPTS[h.dept], who = h.note || d.name;
-  housePin(mkSpot({ dept:h.dept, label:`${who}メンバーの部屋 #${i + 1}`,
+  const g = mkSpot({ dept:h.dept, label:`${who}メンバーの部屋 #${i + 1}`,
     desc:'メンバー1人1人の部屋。本人が自由に飾れる。',
-    todo:['自分の担当タスク（やること／進行中／完了）','もらった「ありがとう」やバッジを飾る棚','自分の times へのポスト'] }), x, y, h.note ? '#8f745e' : d.color);
-} })));
-const timesG = mkSpot(ZONES.times); timesG.anchors = SIGNS;
+    todo:['自分の担当タスク（やること／進行中／完了）','もらった「ありがとう」やバッジを飾る棚','自分の times へのポスト'] }, [[x, y]], wx(x), ground(x, y), wz(y));
+  house(g, h.note ? '#8f745e' : d.color); solid.push([x, y]);
+}));
+BUILDINGS.forEach(b => {
+  const ax = Math.floor(b.x), ay = Math.floor(b.y), g = mkSpot(b, [[ax, ay]], wx(b.x), ground(ax, ay), wz(ay));
+  building(g, DEPTS[b.dept].color, b.big); solid.push([ax, ay]); if (b.big) solid.push([ax - 1, ay], [ax + 1, ay]);
+  const l = label(b.label, b.big ? 1.25 : 1.05); l.position.set(0, b.big ? 3.3 : 2.35, 0); g.add(l);
+});
+const timesG = mkSpot(ZONES.times, SIGNS, 0, 0, 0);
 SIGNS.forEach(([x, y], i) => {
-  const t = inner(timesG, cx(x), cy(y));
-  el('path', { d:'M0 0v11', stroke:'#7d5732', 'stroke-width':3, 'stroke-linecap':'round' }, t);
-  el('rect', { class:'hit', x:-9, y:-11, width:18, height:13, rx:2.5, fill:['#fff','#ffe9a8','#d6f0ff'][i % 3], stroke:'#3b3226', 'stroke-width':2 }, t);
-  el('path', { d:'M-5-7h10M-5-3h6', stroke:'#3b3226', 'stroke-width':1.5, 'stroke-linecap':'round', opacity:.6 }, t);
-  el('rect', { x:-16, y:-18, width:32, height:36, fill:'transparent' }, t);
+  mesh(new THREE.CylinderGeometry(.035, .035, .5), woodD, timesG, wx(x), ground(x, y) + .25, wz(y));
+  mesh(new THREE.BoxGeometry(.5, .32, .05), mat(['#ffffff', '#ffe9a8', '#d6f0ff'][i % 3]), timesG, wx(x), ground(x, y) + .55, wz(y));
 });
-const circleG = mkSpot(ZONES.circle); circleG.anchors = TENTS.map(([x, y]) => [Math.round(x), Math.round(y)]);
-TENTS.forEach(([x, y, c]) => {
-  const t = inner(circleG, cx(x), cy(y));
-  el('path', { class:'hit', d:'M-15 11l15-25 15 25z', fill:c, stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, t);
-  el('path', { d:'M-4 11l4-10 4 10z', fill:'#3b3226', opacity:.75 }, t);
-});
-const pierG = mkSpot(ZONES.pier); pierG.anchors = [[13, 38]];
-el('rect', { x:cx(10) - 14, y:cy(38) + 10, width:140, height:80, fill:'transparent' }, pierG);
-items.sort((a, b) => a.y - b.y).forEach(o => o.draw());
-BUILDINGS.forEach(b => bigPin(mkSpot(b), b, DEPTS[b.dept]));
+{ const l = label(ZONES.times.label, .9); l.position.set(wx(13), ground(13, 30) + 1.5, wz(30)); timesG.add(l); }
+const circleG = mkSpot(ZONES.circle, TENTS.map(([x, y]) => [Math.round(x), Math.round(y)]), 0, 0, 0);
+TENTS.forEach(([x, y, c]) => { const t = mesh(new THREE.ConeGeometry(.55, .75, 4), mat(c, { flatShading:true }), circleG, wx(x), ground(22, 32) + .37, wz(y)); t.rotation.y = Math.PI / 4; });
+{ const l = label(ZONES.circle.label, .9); l.position.set(wx(22), ground(22, 32) + 1.7, wz(32.5)); circleG.add(l); }
+const pierG = mkSpot(ZONES.pier, [[13, 38]], 0, 0, 0);
+{ const l = label(ZONES.pier.label, .9); l.position.set(wx(13), 1.5, wz(40.5)); pierG.add(l); }
 
-const labels = el('g');
-BUILDINGS.forEach(b => el('text', { class:'label' + (b.big ? '' : ' m'), x:cx(b.x), y:cy(b.y) + (b.big ? 64 : 54) }, labels).textContent = b.label);
-Object.values(ZONES).forEach(z => el('text', { class:'label s', x:cx(z.lx), y:cy(z.ly) }, labels).textContent = z.label);
-
-/* ============ 操作 ============ */
-const sheet = document.getElementById('sheet');
-const closeSheet = () => sheet.classList.remove('open');
-const open = info => {
-  const d = DEPTS[info.dept];
-  sheet.style.setProperty('--c', d.color);
-  sheet.innerHTML = `<button class="close" aria-label="閉じる">✕</button><span class="tag">${d.name}</span>
-    <h2>${info.label}</h2><p>${info.desc}</p><ul>${info.todo.map(t => `<li>${t}</li>`).join('')}</ul>
-    <div class="note">※ 試作のため中身は「ここに入れるもの」の案です。まだアクションボードとはつながっていません。</div>`;
-  sheet.classList.add('open');
-  sheet.querySelector('.close').onclick = () => { closeSheet(); refreshAct(); };
-  act.hidden = true;
-};
-
-/* ============ 歩く・触れる（最小のゲーム部分） ============ */
+/* ============ 歩く・触れる ============ */
 const block = grid(0); solid.forEach(([x, y]) => { if (block[y]) block[y][x] = 1; });
 const lvl = (x, y) => Math.max(1, at(tier, x, y));
 const walkable = (x, y) => x >= 0 && y >= 0 && x < W && y < H && land(x, y) && !at(block, x, y) && (!wet(x, y) || at(road, x, y));
-// 段差は道（階段）でしか越えられない。川は橋でしか渡れない
+// 段差は階段でしか越えられない。川は橋でしか渡れない
 const canStep = (ax, ay, bx, by) => walkable(bx, by) && (lvl(ax, ay) === lvl(bx, by) || (at(road, ax, ay) && at(road, bx, by)));
-const route = (from, goal) => {               // 幅優先探索で道順を求める
-  const key = (x, y) => y * W + x, prev = new Map([[key(...from), null]]), q = [from];
+const route = (from, goal) => {
+  const prev = new Map([[key(...from), null]]), q = [from];
   while (q.length) {
     const [x, y] = q.shift();
     if (goal(x, y)) { const out = []; for (let k = key(x, y); k !== null; k = prev.get(k)) out.unshift([k % W, Math.floor(k / W)]); return out; }
@@ -344,71 +348,93 @@ const route = (from, goal) => {               // 幅優先探索で道順を求�
   }
   return null;
 };
-const me = { x:13, y:37, path:[], then:null };
-const meG = el('g', { class:'me' }, svg);
-{ const b = el('g', { class:'walk' }, meG);
-  el('ellipse', { cx:0, cy:12, rx:10, ry:3.5, fill:'#000', opacity:.25 }, meG);
-  el('path', { d:'M-8 11q-2-15 8-15t8 15z', fill:'#ffd166', stroke:'#3b3226', 'stroke-width':2.5, 'stroke-linejoin':'round' }, b);
-  el('circle', { cy:-11, r:10, fill:'#ffe9d2', stroke:'#3b3226', 'stroke-width':2.5 }, b);
-  el('path', { d:'M-10-13q2-10 10-10t10 10q-9-5-20 0z', fill:'#5a4636', stroke:'#3b3226', 'stroke-width':2, 'stroke-linejoin':'round' }, b);
-  el('circle', { cx:-3.5, cy:-10, r:1.4, fill:'#3b3226' }, b); el('circle', { cx:3.5, cy:-10, r:1.4, fill:'#3b3226' }, b); }
-const place = () => meG.setAttribute('transform', `translate(${cx(me.x)} ${cy(me.y)})`);
-const stage = document.getElementById('stage');
-const follow = () => {
-  const r = meG.getBoundingClientRect(), s = stage.getBoundingClientRect(), m = 90;
-  if (r.left < s.left + m || r.right > s.right - m || r.top < s.top + m || r.bottom > s.bottom - m)
-    stage.scrollBy({ left:r.left + r.width / 2 - (s.left + s.width / 2), top:r.top + r.height / 2 - (s.top + s.height / 2), behavior:'smooth' });
-};
-const near = () => {                           // となりにある場所
+const me = { x:13, y:37, fx:13, fy:37, path:[], then:null, t:0 };
+const meG = new THREE.Group(); scene.add(meG);
+mesh(new THREE.CapsuleGeometry(.17, .2, 4, 12), mat('#ffd166'), meG, 0, .3, 0);
+mesh(new THREE.SphereGeometry(.21, 20, 14), mat('#ffe3c9'), meG, 0, .72, 0);
+mesh(new THREE.SphereGeometry(.225, 20, 10, 0, Math.PI * 2, 0, Math.PI * .5), mat('#5a4636'), meG, 0, .76, -.05).rotation.x = -.35;
+for (const s of [-.07, .07]) mesh(new THREE.SphereGeometry(.025, 8, 6), mat('#3b3226'), meG, s, .7, .2);
+
+const sheet = document.getElementById('sheet'), act = document.getElementById('act');
+const closeSheet = () => sheet.classList.remove('open');
+const near = () => {
   let best = null, bd = 9;
-  svg.querySelectorAll('.spot').forEach(g => (g.anchors || []).forEach(([x, y]) => {
-    const d = Math.max(Math.abs(x - me.x), Math.abs(y - me.y)); if (d <= 1 && d < bd) { bd = d; best = g; }
-  }));
+  spots.forEach(g => g.userData.anchors.forEach(([x, y]) => { const d = Math.max(Math.abs(x - me.x), Math.abs(y - me.y)); if (d <= 1 && d < bd) { bd = d; best = g; } }));
   return best;
 };
-const act = document.getElementById('act');
 const refreshAct = () => {
   const g = !me.path.length && !sheet.classList.contains('open') && near();
-  act.hidden = !g; if (g) { act.textContent = `▶ ${g.info.label}`; act.onclick = () => open(g.info); }
+  act.hidden = !g; if (g) { act.textContent = `▶ ${g.userData.info.label}`; act.onclick = () => open(g.userData.info); }
 };
-let t0 = 0;
-const tick = t => {
-  if (!me.path.length) { meG.classList.remove('moving'); const f = me.then; me.then = null; if (f) f(); refreshAct(); return; }
-  if (!t0) t0 = t;
-  const [nx, ny] = me.path[0], k = Math.min(1, (t - t0) / 95), fx = me.fx + (nx - me.fx) * k, fy = me.fy + (ny - me.fy) * k;
-  meG.setAttribute('transform', `translate(${cx(fx)} ${cy(fy)})`);
-  if (k === 1) { me.x = me.fx = nx; me.y = me.fy = ny; me.path.shift(); t0 = 0; follow(); }
-  requestAnimationFrame(tick);
+const open = info => {
+  const d = DEPTS[info.dept];
+  sheet.style.setProperty('--c', d.color);
+  sheet.innerHTML = `<button class="close" aria-label="閉じる">✕</button><span class="tag">${d.name}</span>
+    <h2>${info.label}</h2><p>${info.desc}</p><ul>${info.todo.map(t => `<li>${t}</li>`).join('')}</ul>
+    <div class="note">※ 試作のため中身は「ここに入れるもの」の案です。まだアクションボードとはつながっていません。</div>`;
+  sheet.classList.add('open'); act.hidden = true;
+  sheet.querySelector('.close').onclick = () => { closeSheet(); refreshAct(); };
 };
 const go = (path, then) => {
   if (!path) return false;
-  const idle = !me.path.length;
-  me.path = path.slice(1); me.then = then || null; me.fx = me.x; me.fy = me.y;
-  closeSheet(); act.hidden = true; meG.classList.add('moving');
-  if (idle) { t0 = 0; requestAnimationFrame(tick); }
+  me.path = path.slice(1); me.then = then || null; me.t = 0; me.fx = me.x; me.fy = me.y;
+  closeSheet(); act.hidden = true;
+  if (!me.path.length) { const f = me.then; me.then = null; if (f) f(); refreshAct(); }
   return true;
 };
 const visit = g => {
-  const A = g.anchors || [];
-  const ok = go(route([me.x, me.y], (x, y) => A.some(([ax, ay]) => Math.max(Math.abs(ax - x), Math.abs(ay - y)) <= 1)), () => open(g.info));
-  if (!ok) open(g.info);
+  const A = g.userData.anchors;
+  if (!go(route([me.x, me.y], (x, y) => A.some(([ax, ay]) => Math.max(Math.abs(ax - x), Math.abs(ay - y)) <= 1)), () => open(g.userData.info))) open(g.userData.info);
 };
-svg.addEventListener('click', e => {
-  const g = e.target.closest('.spot');
-  if (g) return visit(g);
-  if (sheet.classList.contains('open')) return closeSheet(), refreshAct();
-  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
-  const tx = Math.floor((p.x - OX) / T), ty = Math.floor((p.y - OY) / T);
+
+/* ============ カメラと入力 ============ */
+const cam = { dist:17, az:0, target:new THREE.Vector3(wx(13), 0, wz(37)) };
+const resize = () => { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); };
+addEventListener('resize', resize); resize();
+const zoomBy = k => { cam.dist = Math.max(8, Math.min(95, cam.dist * k)); };
+document.getElementById('zin').onclick = () => zoomBy(.7);
+document.getElementById('zout').onclick = () => zoomBy(1.45);
+canvas.addEventListener('wheel', e => { e.preventDefault(); zoomBy(e.deltaY > 0 ? 1.1 : .9); }, { passive:false });
+const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+const tap = (cx, cy) => {
+  if (sheet.classList.contains('open')) { closeSheet(); refreshAct(); return; }
+  const r = canvas.getBoundingClientRect(); ptr.set((cx - r.left) / r.width * 2 - 1, -(cy - r.top) / r.height * 2 + 1);
+  ray.setFromCamera(ptr, camera);
+  const hitS = ray.intersectObjects(spots, true).find(h => !h.object.isSprite);
+  const hitT = ray.intersectObject(terrain)[0];
+  if (hitS && (!hitT || hitS.distance < hitT.distance + .5)) { let o = hitS.object; while (o && !o.userData.info) o = o.parent; if (o) return visit(o); }
+  if (!hitT) return;
+  const [tx, ty] = cells[hitT.instanceId], s = spotAt.get(key(tx, ty));
+  if (s && at(block, tx, ty)) return visit(s);
   go(route([me.x, me.y], (x, y) => x === tx && y === ty));
+};
+const pts = new Map(); let drag = null, pinch = 0;
+canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); pts.set(e.pointerId, e); drag = { x:e.clientX, y:e.clientY, az:cam.az, moved:pts.size > 1 }; pinch = 0; });
+canvas.addEventListener('pointermove', e => {
+  if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, e);
+  if (pts.size === 2) {                                   // 2本指で拡大縮小
+    const [a, b] = [...pts.values()], d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (pinch) zoomBy(pinch / d); pinch = d; drag.moved = true; return;
+  }
+  if (drag && Math.abs(e.clientX - drag.x) > 8) { drag.moved = true; cam.az = drag.az - (e.clientX - drag.x) * .006; }
 });
+const up = e => { if (!pts.delete(e.pointerId)) return; if (drag && !drag.moved && e.type === 'pointerup') tap(e.clientX, e.clientY); if (!pts.size) drag = null; pinch = 0; };
+canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
 addEventListener('keydown', e => {
   const d = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0], w:[0,-1], s:[0,1], a:[-1,0], d:[1,0] }[e.key];
   if (d) { e.preventDefault(); if (!me.path.length && canStep(me.x, me.y, me.x + d[0], me.y + d[1])) go([[me.x, me.y], [me.x + d[0], me.y + d[1]]]); }
   else if ((e.key === 'Enter' || e.key === ' ') && !act.hidden) { e.preventDefault(); act.click(); }
   else if (e.key === 'Escape') { closeSheet(); refreshAct(); }
 });
-place(); refreshAct();
 
+// 部門でしぼりこみ
+const chips = document.getElementById('chips'); let current = null;
+Object.entries(DEPTS).forEach(([id, d]) => {
+  const b = document.createElement('button');
+  b.className = 'chip'; b.style.setProperty('--c', d.color); b.setAttribute('aria-pressed', 'false'); b.innerHTML = `<i></i>${d.name}`;
+  b.onclick = () => { current = current === id ? null : id; chips.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(c === b && !!current))); };
+  chips.appendChild(b);
+});
 // 持ち物（＝自分のタスク）。中身はサンプル
 const BAG = [
   { icon:'📝', name:'論点メモを書く', from:'政策立案の館' },
@@ -426,33 +452,35 @@ document.getElementById('bag').onclick = () => {
   sheet.querySelector('.close').onclick = () => { closeSheet(); refreshAct(); };
 };
 
-const chips = document.getElementById('chips');
-let current = null;
-Object.entries(DEPTS).forEach(([id, d]) => {
-  const b = document.createElement('button');
-  b.className = 'chip'; b.style.setProperty('--c', d.color); b.setAttribute('aria-pressed', 'false');
-  b.innerHTML = `<i></i>${d.name}`;
-  b.onclick = () => {
-    current = current === id ? null : id;
-    chips.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(c === b && !!current)));
-    svg.classList.toggle('dim', !!current);
-    svg.querySelectorAll('.spot').forEach(s => s.classList.toggle('on', s.dataset.dept === current));
-  };
-  chips.appendChild(b);
-});
-
-let zoom = 1, base = 0;
-const setZoom = z => {
-  const fx = (stage.scrollLeft + stage.clientWidth / 2) / stage.scrollWidth, fy = (stage.scrollTop + stage.clientHeight / 2) / stage.scrollHeight;
-  if (!base) base = svg.getBoundingClientRect().width;
-  zoom = Math.max(1, Math.min(3, z));
-  Object.assign(svg.style, { width:base * zoom + 'px', height:base * zoom * 4 / 3 + 'px', minHeight:'0', margin:'0 auto' });
-  stage.scrollLeft = fx * stage.scrollWidth - stage.clientWidth / 2; stage.scrollTop = fy * stage.scrollHeight - stage.clientHeight / 2;
-  if (zoom > 1) follow();
+/* ============ 毎フレームの更新 ============ */
+const clock = new THREE.Clock(), center = new THREE.Vector3(0, 0, 0), want = new THREE.Vector3();
+const frame = () => {
+  const dt = Math.min(.25, clock.getDelta()), now = clock.elapsedTime;
+  if (me.path.length) {
+    const [nx, ny] = me.path[0]; me.t = Math.min(1, me.t + dt / .11);
+    const px = me.fx + (nx - me.fx) * me.t, py = me.fy + (ny - me.fy) * me.t;
+    meG.position.set(wx(px), ground(me.fx, me.fy) + (ground(nx, ny) - ground(me.fx, me.fy)) * me.t + Math.abs(Math.sin(now * 16)) * .07, wz(py));
+    meG.rotation.y = Math.atan2(nx - me.fx, ny - me.fy);
+    if (me.t === 1) { me.x = me.fx = nx; me.y = me.fy = ny; me.t = 0; me.path.shift();
+      if (!me.path.length) { const f = me.then; me.then = null; if (f) f(); refreshAct(); } }
+  } else meG.position.set(wx(me.x), ground(me.x, me.y), wz(me.y));
+  spots.forEach(g => {                                    // しぼりこみ中は該当だけ弾ませ、ほかは縮める
+    const on = current && g.userData.info.dept === current, k = !current ? 1 : on ? 1 : .45;
+    g.scale.lerp(want.set(k, k, k), .2); g.position.y = g.userData.base + (on ? Math.abs(Math.sin(now * 4)) * .18 : 0);
+  });
+  { const k = Math.max(1, cam.dist / 20) ** .8; labels.forEach(l => l.scale.set(l.userData.size[0] * k, l.userData.size[1] * k, 1)); }
+  boat.position.y = .12 + Math.sin(now * 1.6) * .03; boat.rotation.z = Math.sin(now * 1.2) * .05;
+  // カメラ：近いときは自分を追い、引くと島全体を映す
+  const far = THREE.MathUtils.smoothstep(cam.dist, 30, 70);
+  want.copy(meG.position).lerp(center, far); cam.target.lerp(want, .12);
+  const el = THREE.MathUtils.lerp(.82, 1.12, far);          // 引くほど真上寄りに
+  camera.position.set(cam.target.x + Math.sin(cam.az) * Math.cos(el) * cam.dist, cam.target.y + Math.sin(el) * cam.dist, cam.target.z + Math.cos(cam.az) * Math.cos(el) * cam.dist);
+  camera.lookAt(cam.target.x, cam.target.y + .4, cam.target.z);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
 };
-document.getElementById('zin').onclick = () => setZoom(zoom + .5);
-document.getElementById('zout').onclick = () => setZoom(zoom - .5);
-})();
+refreshAct(); frame();
+window.__island = { me, cam, spots, visit };
 </script>
 </body>
 </html>
