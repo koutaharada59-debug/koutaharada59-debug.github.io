@@ -1,0 +1,4 @@
+# 再配布できないライセンスの素材（RenderHub の Tinymen Basic Tiles など）を置く手元専用フォルダ。
+# 説明用の README.md だけをリポジトリに含め、素材ファイルは絶対にコミットしない。
+island/local-assets/*
+!island/local-assets/README.md

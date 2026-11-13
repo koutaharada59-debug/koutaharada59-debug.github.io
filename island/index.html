@@ -650,6 +650,16 @@ const frame = () => {
   requestAnimationFrame(frame);
 };
 if (!new URLSearchParams(location.search).has('plain')) useKit().then(() => { window.__kit = 'ready'; }).catch(e => { window.__kit = 'failed'; console.warn('素材の読み込みに失敗。手作りの形のまま表示します', e); });
+/* ============ 手元専用の地形素材（Tinymen）の入口 ============
+   再配布できない素材なのでリポジトリには入れない（island/local-assets/README.md 参照）。
+   ?tiles=tinymen のときだけ、手元のフォルダに manifest.json があるか探す。無ければ何もしない
+   （公開サイトはこの状態）。タイルの組み立ては、素材ファイルを確認してから実装する。 */
+window.__tiles = 'off';
+if (new URLSearchParams(location.search).get('tiles') === 'tinymen') {
+  fetch('./local-assets/tinymen/manifest.json').then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(m => { window.__tiles = 'found'; console.info('Tinymen の設定を検出', m); })
+    .catch(() => { window.__tiles = 'missing'; console.info('Tinymen の素材が見つかりません。island/local-assets/README.md を参照'); });
+}
 refreshAct(); frame();
 window.__island = { me, cam, spots, visit, intro };
 </script>
