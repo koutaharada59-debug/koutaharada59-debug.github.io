@@ -108,6 +108,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
 import * as SkeletonUtils from './vendor/utils/SkeletonUtils.js';
+import { mergeGeometries } from './vendor/utils/BufferGeometryUtils.js';
 
 /* ============ 島の定義（マス目単位。ここを書き換えると島が変わる） ============ */
 const W = 32, H = 42, T = 28, OX = 2, OY = 12;        // 横32マス×縦42マス
@@ -195,9 +196,49 @@ sun.position.set(-18, 34, 14); sun.castShadow = true; sun.shadow.mapSize.set(204
 Object.assign(sun.shadow.camera, { left:-28, right:28, top:28, bottom:-28, near:1, far:90 }); sun.shadow.bias = -.0008;
 scene.add(sun);
 
+/* ============ 手元専用の地形素材（Tinymen Basic Tiles）============
+   再配布できない素材なのでリポジトリには入れない（island/local-assets/README.md 参照）。
+   ?tiles=tinymen で、手元のフォルダに素材があるときだけ有効。無ければ今までの地形のまま。 */
+async function loadTinymen() {
+  const base = './local-assets/tinymen/', NAMES = ['GroundTile', 'CoastTile_A', 'CoastTile_B', 'CoastTile_C', 'CoastTurnTile', 'CliffTile_A', 'CliffTile_C', 'CliffCornerTile', 'WaterTile',
+    'RiverEndTile', 'RiverStraightTile', 'RiverTurnTile', 'RiverTriadTile', 'RiverQuadTile', 'RoadEndTile', 'RoadStraightTile', 'RoadTurnTile', 'RoadTriadTile', 'RoadQuadTile', 'RoadRampTile',
+    'ForestTree_A', 'ForestTree_B', 'PineTree_A', 'PineTree_B', 'PalmTree_A', 'Bush_A', 'Bush_C', 'BerryBush_A', 'Rock_A', 'Rock_B', 'DeadTree_A'];
+  const gl = new GLTFLoader(), scenes = {};
+  const [pal] = await Promise.all([new THREE.TextureLoader().loadAsync(base + 'palette.png'), ...NAMES.map(n => gl.loadAsync(`${base}GEO_${n}.glb`).then(g => { scenes[n] = g.scene; }))]);
+  pal.flipY = false; pal.colorSpace = THREE.SRGBColorSpace; pal.anisotropy = 4;
+  const G = {};                                                       // 形だけを取り出し、ノードの変換を焼き込む
+  for (const n of NAMES) {
+    const parts = []; scenes[n].updateMatrixWorld(true);
+    scenes[n].traverse(m => { if (m.isMesh) { const g = m.geometry.clone(); g.applyMatrix4(m.matrixWorld); parts.push(g); } });
+    G[n] = parts.length === 1 ? parts[0] : mergeGeometries(parts);
+    if (!n.endsWith('Tile')) { G[n].computeBoundingBox(); const b = G[n].boundingBox; G[n].translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2); }
+  }
+  // 砂浜・広場用：パレットの緑を砂色に寄せた絵柄
+  const tune = (img, fn) => { const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height; const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0);
+    const dd = cx.getImageData(0, 0, cv.width, cv.height), pp = dd.data; for (let i = 0; i < pp.length; i += 4) { const o = fn(pp[i], pp[i + 1], pp[i + 2]); if (o) { pp[i] = o[0]; pp[i + 1] = o[1]; pp[i + 2] = o[2]; } }
+    cx.putImageData(dd, 0, 0); const t = new THREE.CanvasTexture(cv); t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; };
+  const palGreen = tune(pal.image, (r, g, b) => {              // 緑の色相を黄緑のほうへ寄せ、少し明るく
+    if (!(g > r + 8 && g > b + 8)) return null;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), v = mx / 255, sat = (mx - mn) / mx; let h = 60 * (((b - r) / (mx - mn)) + 2);
+    h = 82 + (h - 90) * .35; const S = Math.min(1, sat * 1.2), V = Math.min(1, v * 1.12), f = n => { const k = (n + h / 60) % 6; return (V - V * S * Math.max(0, Math.min(k, 4 - k, 1))) * 255; };
+    return [f(5), f(3), f(1)]; });
+  const c = document.createElement('canvas'); c.width = pal.image.width; c.height = pal.image.height;
+  const x = c.getContext('2d'); x.drawImage(pal.image, 0, 0); const d = x.getImageData(0, 0, c.width, c.height), q = d.data;
+  for (let i = 0; i < q.length; i += 4) {
+    const r = q[i], g = q[i + 1], b = q[i + 2];
+    if (g > r + 8 && g > b + 8) { const l = (r + g + b) / 3; q[i] = Math.min(255, l * 1.5 + 40); q[i + 1] = Math.min(255, l * 1.35 + 30); q[i + 2] = Math.min(255, l * .95 + 15); }
+  }
+  x.putImageData(d, 0, 0); const sandTex = new THREE.CanvasTexture(c); sandTex.flipY = false; sandTex.colorSpace = THREE.SRGBColorSpace;
+  const std = map => new THREE.MeshStandardMaterial({ map, metalness: 0, roughness: 1 });
+  return { G, mat: std(palGreen), matSand: std(sandTex) };
+}
+const TILES_FLAG = new URLSearchParams(location.search).get('tiles') === 'tinymen';
+const TM = TILES_FLAG ? await loadTinymen().catch(e => { console.info('Tinymen の素材を読み込めません。island/local-assets/README.md を参照', e); return null; }) : null;
+window.__tiles = TM ? 'on' : TILES_FLAG ? 'missing' : 'off';
+
 const land = (x, y) => at(tier, x, y) > 0 || at(sand, x, y);
 const wet = (x, y) => at(water, x, y);
-const HT = [.14, .4, 1.05, 1.7];                                   // 砂浜・1段目・2段目・3段目の高さ
+const HT = TM ? [.06, .5, 1, 1.5] : [.14, .4, 1.05, 1.7];         // 砂浜・1段目・2段目・3段目の高さ（タイル版は0.5刻み）
 const wx = x => x - W / 2 + .5, wz = y => y - H / 2 + .5;
 const bridge = (x, y) => wet(x, y) && at(road, x, y) && at(tier, x, y) > 0;
 const ground = (x, y) => HT[at(tier, Math.round(x), Math.round(y))] ?? HT[0];   // 歩く高さ
@@ -223,6 +264,60 @@ cells.forEach(([x, y], i) => {
   terrain.setColorAt(i, C);
 });
 scene.add(terrain);
+
+if (TM) {
+  // 今までの箱は「タップ位置の判定」専用にして、見えるのはタイルだけにする
+  terrain.material = new THREE.MeshBasicMaterial({ visible: false }); terrain.castShadow = false; terrain.receiveShadow = false;
+  const S = .25, DIR = [[0, -1], [1, 0], [0, 1], [-1, 0]];             // N,E,S,W（時計まわり）。タイルは4×4なので1/4に縮める
+  const lv = (x, y) => (x < 0 || y < 0 || x >= W || y >= H || !land(x, y)) ? -1 : at(tier, x, y);   // 段の番号。海は -1
+  const inst = {}, put = (name, x, y, top, m, sandMat = false) => { (inst[(sandMat ? 'S:' : '') + name] ||= []).push([x, y, top, m]); };
+  const dirsWhere = (x, y, f) => DIR.map(([a, b], i) => f(x + a, y + b) ? i : -1).filter(i => i >= 0);
+  // 開いている辺の組から種類と回転を決める。回転0のとき End=S、Straight=N+S、Turn=S+W、Triad=Sだけ閉、Quad=4辺
+  const pick = dirs => {
+    const n = dirs.length, set = new Set(dirs);
+    if (n === 0) return null;
+    if (n === 1) return ['End', (2 - dirs[0] + 4) % 4];
+    if (n === 4) return ['Quad', 0];
+    if (n === 3) return ['Triad', (2 - [0, 1, 2, 3].find(i => !set.has(i)) + 4) % 4];
+    const [a, b] = dirs; if ((b - a) % 2 === 0) return ['Straight', set.has(0) ? 0 : 1];
+    return ['Turn', (2 - (set.has(0) && set.has(3) ? 3 : Math.min(a, b)) + 4) % 4];
+  };
+  // 崖：壁がE側に向くのが回転0。2辺が隣り合う角は CliffCorner（向きは目で確認して調整する）
+  const cliff = (x, y, exp, top) => {
+    const v = 'CliffTile_C';                                              // 縁がそろうよう1種類にする（A と C は同じ向き）
+    if (exp.length === 0) return ['GroundTile', 0];
+    if (exp.length === 2 && (exp[1] - exp[0]) % 2 !== 0) { const j = exp.includes(0) && exp.includes(3) ? 3 : exp[0]; return ['CliffCornerTile', (1 - j + 4) % 4]; }
+    return [v, (1 - exp[0] + 4) % 4];
+  };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!land(x, y)) continue;
+    const t = at(tier, x, y), isW = wet(x, y), isR = at(road, x, y) && !isW;
+    for (let j = 1; j < t; j++) { const [nm, m] = cliff(x, y, dirsWhere(x, y, (a, b) => lv(a, b) < j), j * .5); put(nm, x, y, j * .5, m); }   // 柱の途中
+    const top = t === 0 ? HT[0] : t * .5;
+    if (t === 0) {                                                       // 砂浜：海に面した辺で海岸タイルを選ぶ
+      const sea = dirsWhere(x, y, (a, b) => lv(a, b) < 0);
+      if (sea.length === 1) put('CoastTile_' + 'ABC'[(x * 5 + y * 3) % 3], x, y, top, (0 - sea[0] + 4) % 4);
+      else if (sea.length === 2 && (sea[1] - sea[0]) % 2 !== 0) put('CoastTurnTile', x, y, top, (0 - (sea.includes(0) && sea.includes(3) ? 3 : sea[0]) + 4) % 4);
+      else put('GroundTile', x, y, top, 0, true);
+    } else if (isW) {                                                    // 川・池（橋の下も）
+      const wd = dirsWhere(x, y, (a, b) => wet(a, b) && land(a, b));
+      const pk = wd.length >= 3 || wd.length === 0 ? null : pick(wd);
+      put(pk ? 'River' + pk[0] + 'Tile' : 'WaterTile', x, y, top, pk ? pk[1] : 0);
+    } else if (isR) {                                                    // 道：1段高い道が隣にあれば坂、なければ辺のつながりで選ぶ
+      const up = dirsWhere(x, y, (a, b) => at(road, a, b) && !wet(a, b) && lv(a, b) === t + 1);
+      if (up.length) put('RoadRampTile', x, y, top - .01, (3 - up[0] + 4) % 4);
+      else { const pk = pick(dirsWhere(x, y, (a, b) => at(road, a, b) && land(a, b))); put(pk ? 'Road' + pk[0] + 'Tile' : 'GroundTile', x, y, top, pk ? pk[1] : 0, !pk); }
+    } else if (at(plaza, x, y)) put('GroundTile', x, y, top, 0, true);
+    else { const [nm, m] = cliff(x, y, dirsWhere(x, y, (a, b) => lv(a, b) < t), top); put(nm, x, y, top, m); }
+  }
+  const Yax = new THREE.Vector3(0, 1, 0), Q = new THREE.Quaternion();
+  for (const [k, list] of Object.entries(inst)) {
+    const sandMat = k.startsWith('S:'), name = k.replace('S:', ''), im = new THREE.InstancedMesh(TM.G[name], sandMat ? TM.matSand : TM.mat, list.length);
+    list.forEach(([x, y, top, m], i) => im.setMatrixAt(i, M4.compose(new THREE.Vector3(wx(x), top, wz(y)), Q.setFromAxisAngle(Yax, m * Math.PI / 2), new THREE.Vector3(S, S, S))));
+    im.castShadow = true; im.receiveShadow = true; scene.add(im);
+  }
+  window.__tileCounts = Object.fromEntries(Object.entries(inst).map(([k, l]) => [k, l.length]));
+}
 // 浅瀬
 { const coast = cells.filter(([x, y]) => [[1,0],[-1,0],[0,1],[0,-1]].some(([a, b]) => !land(x + a, y + b)));
   const m = new THREE.InstancedMesh(new THREE.CircleGeometry(1.7, 20), new THREE.MeshBasicMaterial({ color:'#a6e3df' }), coast.length);
@@ -231,7 +326,7 @@ scene.add(terrain);
 // 階段・橋
 const wood = mat('#c4925a'), woodD = mat('#8a623a'), stone = mat('#d8c391');
 for (let y = 1; y < H; y++) for (let x = 0; x < W; x++) {
-  if (at(road, x, y) && at(road, x, y - 1) && land(x, y) && at(tier, x, y - 1) > at(tier, x, y) && !wet(x, y)) {
+  if (!TM && at(road, x, y) && at(road, x, y - 1) && land(x, y) && at(tier, x, y - 1) > at(tier, x, y) && !wet(x, y)) {
     const lo = ground(x, y), d = ground(x, y - 1) - lo;
     for (let k = 0; k < 4; k++) mesh(new THREE.BoxGeometry(.8, d * (4 - k) / 4, .25), stone, scene, wx(x), lo + d * (4 - k) / 8, wz(y) - .375 + k * .25);
   }
@@ -279,6 +374,25 @@ for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
   flowerAt.forEach(([x, y, z], i) => [['#ff9db0', -.2, 0], ['#ffffff', .15, -.12], ['#ffd166', .1, .2]].forEach(([c, a, b], k) => {
     fl.setMatrixAt(i * 3 + k, M4.compose(new THREE.Vector3(x + a, y + .1, z + b), q, new THREE.Vector3(1, 1, 1))); fl.setColorAt(i * 3 + k, C.set(c)); }));
   scene.add(fl); }
+
+if (TM) {
+  let r = 11; const rr = () => (r = (r * 16807) % 2147483647) / 2147483647;
+  const want = {};                                                     // 種類ごとの配置リスト
+  const add = (name, x, y, z, size) => (want[name] ||= []).push([x, y, z, size, rr() * Math.PI * 2]);
+  treeAt.forEach(([x, y, z], i) => {
+    const t = at(tier, Math.round((x + W / 2 - .5)), Math.round((z + H / 2 - .5)));
+    if (i % 4 === 0) add(['Bush_A', 'Bush_C', 'BerryBush_A'][i % 3 === 0 ? 0 : i % 3], x, y, z, .25 * 1.5);
+    else if (i % 11 === 5) add('Rock_A', x, y, z, .25 * 1.3);
+    else add(t >= 3 ? ['PineTree_A', 'PineTree_B'][i % 2] : ['ForestTree_A', 'ForestTree_B', 'PineTree_A'][i % 3], x, y, z, .25 * (.85 + rr() * .3));
+  });
+  ROCKS.forEach(([x, y], i) => add(['Rock_A', 'Rock_B'][i % 2], wx(x), HT[0], wz(y), .25 * 1.6));
+  for (const [name, list] of Object.entries(want)) {
+    const im = new THREE.InstancedMesh(TM.G[name], TM.mat, list.length);
+    list.forEach(([x, y, z, k, yaw], i) => im.setMatrixAt(i, M4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(k, k, k))));
+    im.castShadow = true; im.receiveShadow = true; scene.add(im);
+  }
+  primDeco.forEach(q => { q.visible = false; });
+}
 
 /* ============ 建物・家 ============ */
 const spots = [], solid = [], spotAt = new Map(), key = (x, y) => y * W + x;
@@ -405,10 +519,12 @@ const useKit = async () => {
   const TREES = ['Tree_1_A_Color1.gltf', 'Tree_2_A_Color1.gltf', 'Tree_2_C_Color1.gltf', 'Tree_3_A_Color1.gltf', 'Tree_4_A_Color1.gltf'], BUSH = ['Bush_1_A_Color1.gltf', 'Bush_2_A_Color1.gltf', 'Bush_4_A_Color1.gltf'];
   const put = (m, x, y, z, yaw = 0) => { m.position.set(x, y, z); m.rotation.y = yaw; scene.add(m); return m; };
   let n = 0;
-  treeAt.forEach(([x, y, z]) => { n++;
-    if (n % 4 === 0) put(make(BUSH[n % 3], .5 + rr() * .15, 'h'), x, y, z, rr() * 6);
-    else put(make(TREES[n % 5], (.95 + rr() * .4), 'h'), x, y, z, rr() * 6); });
-  ROCKS.forEach(([x, y], i) => put(make(['Rock_1_A_Color1.gltf', 'Rock_2_A_Color1.gltf', 'Rock_3_A_Color1.gltf'][i % 3], .85, 'w'), wx(x), .05, wz(y), i));
+  if (!TM) {
+    treeAt.forEach(([x, y, z]) => { n++;
+      if (n % 4 === 0) put(make(BUSH[n % 3], .5 + rr() * .15, 'h'), x, y, z, rr() * 6);
+      else put(make(TREES[n % 5], (.95 + rr() * .4), 'h'), x, y, z, rr() * 6); });
+    ROCKS.forEach(([x, y], i) => put(make(['Rock_1_A_Color1.gltf', 'Rock_2_A_Color1.gltf', 'Rock_3_A_Color1.gltf'][i % 3], .85, 'w'), wx(x), .05, wz(y), i));
+  }
   primDeco.forEach(q => { q.visible = false; });
   // 小物（建物のそば）
   [['barrel.gltf', 15.6, 11.2, .32], ['crate_A_small.gltf', 13.4, 11.4, .34], ['wheelbarrow.gltf', 24.2, 5.4, .5], ['crate_A_small.gltf', 26.6, 5.6, .34], ['sack.gltf', 7.2, 29.8, .3], ['barrel.gltf', 5.0, 29.6, .32],
@@ -650,16 +766,6 @@ const frame = () => {
   requestAnimationFrame(frame);
 };
 if (!new URLSearchParams(location.search).has('plain')) useKit().then(() => { window.__kit = 'ready'; }).catch(e => { window.__kit = 'failed'; console.warn('素材の読み込みに失敗。手作りの形のまま表示します', e); });
-/* ============ 手元専用の地形素材（Tinymen）の入口 ============
-   再配布できない素材なのでリポジトリには入れない（island/local-assets/README.md 参照）。
-   ?tiles=tinymen のときだけ、手元のフォルダに manifest.json があるか探す。無ければ何もしない
-   （公開サイトはこの状態）。タイルの組み立ては、素材ファイルを確認してから実装する。 */
-window.__tiles = 'off';
-if (new URLSearchParams(location.search).get('tiles') === 'tinymen') {
-  fetch('./local-assets/tinymen/manifest.json').then(r => r.ok ? r.json() : Promise.reject(r.status))
-    .then(m => { window.__tiles = 'found'; console.info('Tinymen の設定を検出', m); })
-    .catch(() => { window.__tiles = 'missing'; console.info('Tinymen の素材が見つかりません。island/local-assets/README.md を参照'); });
-}
 refreshAct(); frame();
 window.__island = { me, cam, spots, visit, intro };
 </script>

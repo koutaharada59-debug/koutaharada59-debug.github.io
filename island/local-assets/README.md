@@ -14,9 +14,12 @@ GitHub にも GitHub Pages（公開サイト）にも載りません。この RE
 ### 置き方
 
 1. 上の配布ページからダウンロードする（形式は `.glb`。zipのままでよい）。
-2. zip を展開し、`.glb` ファイルとテクスチャを、次のフォルダにそのまま置く。
+2. zip を展開し、次の2種類だけを `island/local-assets/tinymen/` に置く。
+   - `glb/` の中の `GEO_*.glb`（形だけのモデル。`ARM_*.glb` は使わない）
+   - `texture/Overall-Palette_512.png`（**`palette.png` という名前に変えて**置く。この素材の `.glb` には色が入っておらず、このパレット画像のUVで色が決まる）
 
-       island/local-assets/tinymen/
+       island/local-assets/tinymen/GEO_GroundTile.glb ほか
+       island/local-assets/tinymen/palette.png
 
 3. 手元で確認する（`file://` では動かないので、簡易サーバーを使う）。
 
@@ -24,7 +27,7 @@ GitHub にも GitHub Pages（公開サイト）にも載りません。この RE
        python3 -m http.server 8000
        # ブラウザで http://localhost:8000/island/?tiles=tinymen を開く
 
-`?tiles=tinymen` を付けず、またはフォルダが空のときは、今までどおりの地形で表示されます（公開サイトはこの状態）。
+`?tiles=tinymen` を付けないとき、またはフォルダに素材がないときは、今までどおりの地形で表示されます（公開サイトはこの状態）。
 
 ### コミットの事故を防ぐ確認
 
