@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>アクションボード島（3D試作）</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏝️</text></svg>">
+<style>
+  :root {
+    --sea:#79c9c4; --ink:#3b3226; --paper:#fffaf0; --line:#e6dcc6;
+    --policy:#e07a5f; --pr:#eeb02f; --plan:#b678c9; --eng:#4a8fd9; --office:#7d8c9a; --all:#d9534a; --guest:#9a7b62;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; }
+  body {
+    margin:0; background:var(--sea); color:var(--ink); overflow:hidden;
+    font-family:"Hiragino Maru Gothic ProN","Zen Maru Gothic","M PLUS Rounded 1c","Yu Gothic","Noto Sans JP",sans-serif;
+    display:flex; flex-direction:column;
+  }
+  header {
+    flex:none; padding:calc(10px + env(safe-area-inset-top)) 16px 8px; background:var(--paper);
+    border-bottom:3px solid var(--line); z-index:2;
+  }
+  h1 { margin:0; font-size:17px; letter-spacing:.04em; }
+  h1 small { font-size:11px; font-weight:500; color:#8a7a62; margin-left:.5em; }
+  .chips { display:flex; gap:6px; overflow-x:auto; margin:8px -16px 0; padding:0 16px 2px; scrollbar-width:none; }
+  .chips::-webkit-scrollbar { display:none; }
+  .chip {
+    flex:none; border:2px solid var(--line); background:#fff; color:var(--ink); font:inherit; font-size:12px; font-weight:700;
+    padding:5px 10px 5px 8px; border-radius:99px; display:flex; align-items:center; gap:6px; cursor:pointer;
+  }
+  .chip i { width:10px; height:10px; border-radius:50%; background:var(--c); }
+  .chip[aria-pressed="true"] { border-color:var(--c); background:color-mix(in srgb, var(--c) 16%, #fff); }
+
+  #stage { flex:1; position:relative; min-height:0; }
+  #map { display:block; width:100%; height:100%; touch-action:none; cursor:pointer; }
+
+  .zoom { position:fixed; right:12px; bottom:calc(16px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:6px; z-index:3; }
+  .zoom button {
+    width:44px; height:44px; border-radius:14px; border:3px solid var(--line); background:var(--paper); color:var(--ink);
+    font:700 22px/1 inherit; cursor:pointer; box-shadow:0 3px 0 rgba(59,50,38,.18);
+  }
+
+  .spot { cursor:pointer; }
+  .spot:focus { outline:none; }
+  .spot:focus-visible .hit { stroke:#fff; stroke-width:4; }
+  #bag, #act {
+    position:fixed; z-index:3; bottom:calc(16px + env(safe-area-inset-bottom)); border:3px solid var(--line); background:var(--paper); color:var(--ink);
+    font:700 14px/1 inherit; padding:13px 16px; border-radius:99px; cursor:pointer; box-shadow:0 3px 0 rgba(59,50,38,.18);
+  }
+  #bag { left:12px; }
+  #act { left:50%; transform:translateX(-50%); background:#3b3226; color:#fff; border-color:#3b3226; max-width:52vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .me { pointer-events:none; }
+  .me.moving .walk { animation:hop .2s ease-in-out infinite; }
+  @keyframes hop { 50% { transform:translateY(-3px); } }
+  .slots { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
+  .slot { aspect-ratio:1; background:#fff; border:2px solid var(--line); border-radius:14px; padding:6px 4px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:2px; }
+  .slot.empty { background:#f3ead6; border-style:dashed; }
+  .slot b { font-size:20px; } .slot span { font-size:10px; font-weight:700; line-height:1.25; } .slot small { font-size:8px; color:#8a7a62; }
+  #title { position:fixed; inset:0; padding-bottom:42vh; z-index:5; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+    pointer-events:none; opacity:0; transition:opacity .9s; text-align:center; }
+  #title.show { opacity:1; }
+  #title b { font-size:clamp(30px, 9vw, 60px); letter-spacing:.08em; color:#fff; text-shadow:0 3px 0 rgba(59,50,38,.35), 0 0 24px rgba(59,50,38,.35); }
+  #title span { font-size:13px; font-weight:700; color:#fff; background:rgba(59,50,38,.45); padding:5px 12px; border-radius:99px; }
+  body.intro header, body.intro #bag, body.intro #act, body.intro .zoom { opacity:0; pointer-events:none; }
+  header, #bag, .zoom { transition:opacity .6s; }
+  .label { font-weight:800; font-size:25px; fill:var(--ink); stroke:#fffaf0; stroke-width:7; paint-order:stroke; stroke-linejoin:round; text-anchor:middle; pointer-events:none; }
+  .label.m { font-size:22px; }
+  .label.s { font-size:19px; stroke-width:6; }
+  .dim .spot:not(.on), .dim .tree { opacity:.28; }
+  .spot, .tree { transition:opacity .25s; }
+  .spot.on .bob { animation:bob 1s ease-in-out infinite; }
+  @keyframes bob { 50% { transform:translateY(-5px); } }
+  .wave { animation:drift 7s ease-in-out infinite alternate; }
+  @keyframes drift { to { transform:translateX(14px); } }
+  @media (prefers-reduced-motion: reduce) { .wave, .spot.on .bob { animation:none; } }
+
+  #sheet {
+    position:fixed; left:0; right:0; bottom:0; z-index:4; background:var(--paper); border-top:3px solid var(--line);
+    border-radius:22px 22px 0 0; padding:14px 18px calc(18px + env(safe-area-inset-bottom));
+    transform:translateY(105%); transition:transform .28s cubic-bezier(.22,1,.36,1); max-height:60vh; overflow:auto;
+    box-shadow:0 -6px 24px rgba(59,50,38,.18);
+  }
+  #sheet.open { transform:none; }
+  #sheet .tag { display:inline-block; font-size:11px; font-weight:800; color:#fff; background:var(--c,#888); padding:3px 9px; border-radius:99px; }
+  #sheet h2 { margin:8px 0 4px; font-size:19px; }
+  #sheet p { margin:0 0 10px; font-size:14px; line-height:1.7; }
+  #sheet ul { margin:0; padding:0; list-style:none; display:grid; gap:6px; }
+  #sheet li { font-size:13px; background:#fff; border:2px solid var(--line); border-radius:12px; padding:8px 12px; }
+  #sheet .close { position:absolute; right:12px; top:10px; width:36px; height:36px; border:0; border-radius:50%; background:#efe6d2; font:700 16px/1 inherit; color:var(--ink); cursor:pointer; }
+  #sheet .note { font-size:11px; color:#8a7a62; margin-top:10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>アクションボード島<small>3D試作・タップで歩く</small></h1>
+  <div class="chips" id="chips"></div>
+</header>
+<div id="stage"><canvas id="map" aria-label="アクションボード島"></canvas></div>
+<div id="title"><b>アクションボード島</b><span>タップでスキップ</span></div>
+<div class="zoom"><button id="snd" aria-label="音のオン・オフ">♪</button><button id="zin" aria-label="近づく">＋</button><button id="zout" aria-label="引く">－</button></div>
+<button id="bag">持ち物</button>
+<button id="act" hidden></button>
+<div id="sheet" role="dialog" aria-live="polite"></div>
+
+<script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from './vendor/GLTFLoader.js';
+import * as SkeletonUtils from './vendor/utils/SkeletonUtils.js';
+import { mergeGeometries } from './vendor/utils/BufferGeometryUtils.js';
+
+/* ============ 島の定義（マス目単位。ここを書き換えると島が変わる） ============ */
+const W = 32, H = 42, T = 28, OX = 2, OY = 12;        // 横32マス×縦42マス
+// 四角形は [x, y, 幅, 高さ]
+const GRASS  = [[5,4,22,32],[4,6,24,28],[3,9,1,22],[28,12,1,18],[6,3,16,1],[5,36,4,1],[20,36,6,1]];
+const BEACH  = [[10,36,8,3],[1,27,3,5],[28,31,2,4],[26,3,3,2]];
+const TIER2  = [[4,4,24,11],[4,15,6,3],[20,15,8,4],[3,8,1,8]];
+const TIER3  = [[16,4,12,6],[20,10,8,2],[16,3,6,1]];
+const WATER  = [[17,5,3,2],[18,7,2,22],[9,24,11,2],[9,24,2,18],[18,27,14,2]];   // 池・川
+const ROADS  = [[4,20,24,1],[13,6,1,12],[5,8,9,1],[5,12,9,1],[21,5,1,15],[21,5,4,1],[22,9,6,1],
+                [6,20,1,8],[13,23,1,15],[13,33,8,1],[24,20,1,3]];
+const PLAZAS = [[11,18,5,5],[20,31,5,4]];
+const ROCKS  = [[2,5],[3,4],[29,7],[30,9],[29,22],[2,34],[3,37],[27,38],[29,36],[8,2],[15,1]];
+
+const DEPTS = {
+  all:    { name:'全体',     color:'#3fae6a', mark:'全' },
+  policy: { name:'政策立案', color:'#d9534a', mark:'政' },
+  pr:     { name:'広報',     color:'#e0a21c', mark:'広' },
+  plan:   { name:'企画',     color:'#9b5fc0', mark:'企' },
+  eng:    { name:'エンジニア', color:'#3f83d1', mark:'エ' },
+  office: { name:'事務局',   color:'#7a8794', mark:'事' },
+  culture:{ name:'文化',     color:'#2f9e7c', mark:'文' },
+};
+const BUILDINGS = [   // x, y はマス目の座標
+  { id:'hall',   dept:'all',    x:13, y:19.6, big:true, label:'みんなの集会所',
+    desc:'学生チーム全員用の建物。島の真ん中の広場に建っている。',
+    todo:['全体タスクボード（今のアクションボードのトップ）','全体告知の掲示板','今週の達成・MVP の発表'] },
+  { id:'policy', dept:'policy', x:14.6, y:10, label:'政策立案の館',
+    desc:'政策立案部門の建物。北西の高台に、メンバーの家が並ぶ島でいちばん大きな集落がある。',
+    todo:['部門のタスクボード','リサーチノート・Polis の論点置き場','部門ミーティングの予定'] },
+  { id:'eng',    dept:'eng',    x:25, y:4.6, label:'エンジニア工房',
+    desc:'エンジニア部門の建物。滝の上、島でいちばん高い場所にある。',
+    todo:['開発タスク・Issue ボード','リリースのお知らせ','つくったツールの展示'] },
+  { id:'plan',   dept:'plan',   x:24, y:23.2, label:'企画のアトリエ',
+    desc:'企画部門の建物。橋をわたった東の岸にある。',
+    todo:['イベント企画のタスクボード','アイデアのたまり場','開催スケジュール'] },
+  { id:'pr',     dept:'pr',     x:6, y:28.6, label:'広報スタジオ',
+    desc:'広報部門の建物。西の浜辺の近く。',
+    todo:['発信物の制作タスク','SNS 投稿カレンダー','素材置き場'] },
+  { id:'office', dept:'office', x:8.5, y:18.6, label:'事務局',
+    desc:'事務局の建物。集会所のすぐ西で島全体を支える。',
+    todo:['運営タスク・手続き','新メンバーの受け入れ窓口','島のルール・ガイド'] },
+];
+const HOUSES = [      // 部門ごとの軒数は 2026-11 時点のメンバー数（名前は載せていない）
+  { dept:'policy', at:[5,7,9,11].flatMap(x => [6,10,14].map(y => [x, y])).concat([[6,4],[8,4],[10,4],[12,4]]) },
+  { dept:'eng',    at:[[23,8],[25,8],[27,8],[23,10],[25,10],[27,10]] },
+  { dept:'plan',   at:[[21,22],[27,22],[21,24],[27,24],[21,26],[27,26],[20,22]] },
+  { dept:'pr',     at:[[4,32],[7,32],[5,34]] },
+  { dept:'office', at:[[5,18],[4,22]] },
+  { dept:'all',    at:[[8,22],[10,23],[16,23]], note:'代表・サポーター' },
+];
+const SIGNS = [[12,26],[14,28],[12,30],[14,31],[12,35],[14,36]];   // times通りの立て札
+const TENTS = [[20.6,31.6,'#ff9db0'],[22.5,31.2,'#7fd3c1'],[24,32,'#ffd166'],[21.4,33.9,'#a8b8ff'],[23.4,34.2,'#f4a261']];
+const ZONES = {
+  times:  { dept:'culture', label:'times通り', lx:16.4, ly:30.4,
+    desc:'集会所から船着き場へつづく一本道。メンバーそれぞれの「times」の立て札が並ぶ。',
+    todo:['各メンバーの times（つぶやき）を立て札として表示','新しい投稿があると札が光る','歩きながら近況を眺められる'] },
+  circle: { dept:'culture', label:'サークル広場', lx:22.5, ly:36.3,
+    desc:'サークルのテントが集まる広場。部門をこえた集まりの場所。',
+    todo:['サークルごとのテント（部室）','メンバー募集の看板','活動予定'] },
+  pier:   { dept:'all', label:'船着き場', lx:16.6, ly:40.4,
+    desc:'島の入口。ログインするとここに着く。',
+    todo:['はじめての人向けの案内','今日やることのサマリー'] },
+};
+
+
+/* ============ マス目データを作る ============ */
+const grid = v => Array.from({ length:H }, () => Array(W).fill(v));
+const paint = (g, rects, v) => rects.forEach(([x, y, w, h]) => { for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (g[j] && i >= 0 && i < W) g[j][i] = v; });
+const tier = grid(0), sand = grid(0), water = grid(0), road = grid(0), plaza = grid(0);
+paint(tier, GRASS, 1); paint(tier, TIER2, 2); paint(tier, TIER3, 3);
+paint(sand, BEACH, 1); paint(water, WATER, 1); paint(road, ROADS, 1); paint(plaza, PLAZAS, 1);
+const at = (g, x, y) => (g[y] && g[y][x]) || 0;
+
+/* ============ 3Dの舞台 ============ */
+const canvas = document.getElementById('map'), stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#bfe9f2'); scene.fog = new THREE.Fog('#bfe9f2', 70, 150);
+const camera = new THREE.PerspectiveCamera(34, 1, .1, 400);
+const hemi = new THREE.HemisphereLight('#ffffff', '#9ac79a', 1.5); scene.add(hemi);
+const sun = new THREE.DirectionalLight('#fff3d6', 2.1);
+sun.position.set(-18, 34, 14); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left:-28, right:28, top:28, bottom:-28, near:1, far:90 }); sun.shadow.bias = -.0008;
+scene.add(sun);
+
+/* ============ 手元専用の地形素材（Tinymen Basic Tiles）============
+   再配布できない素材なのでリポジトリには入れない（island/local-assets/README.md 参照）。
+   ?tiles=tinymen で、手元のフォルダに素材があるときだけ有効。無ければ今までの地形のまま。 */
+async function loadTinymen() {
+  const base = './local-assets/tinymen/', NAMES = ['GroundTile', 'CoastTile_A', 'CoastTile_B', 'CoastTile_C', 'CoastTurnTile', 'CliffTile_A', 'CliffTile_C', 'CliffCornerTile', 'WaterTile',
+    'RiverEndTile', 'RiverStraightTile', 'RiverTurnTile', 'RiverTriadTile', 'RiverQuadTile', 'RoadEndTile', 'RoadStraightTile', 'RoadTurnTile', 'RoadTriadTile', 'RoadQuadTile', 'RoadRampTile',
+    'ForestTree_A', 'ForestTree_B', 'PineTree_A', 'PineTree_B', 'PalmTree_A', 'Bush_A', 'Bush_C', 'BerryBush_A', 'Rock_A', 'Rock_B', 'DeadTree_A'];
+  const gl = new GLTFLoader(), scenes = {};
+  const [pal] = await Promise.all([new THREE.TextureLoader().loadAsync(base + 'palette.png'), ...NAMES.map(n => gl.loadAsync(`${base}GEO_${n}.glb`).then(g => { scenes[n] = g.scene; }))]);
+  pal.flipY = false; pal.colorSpace = THREE.SRGBColorSpace; pal.anisotropy = 4;
+  const G = {};                                                       // 形だけを取り出し、ノードの変換を焼き込む
+  for (const n of NAMES) {
+    const parts = []; scenes[n].updateMatrixWorld(true);
+    scenes[n].traverse(m => { if (m.isMesh) { const g = m.geometry.clone(); g.applyMatrix4(m.matrixWorld); parts.push(g); } });
+    G[n] = parts.length === 1 ? parts[0] : mergeGeometries(parts);
+    if (!n.endsWith('Tile')) { G[n].computeBoundingBox(); const b = G[n].boundingBox; G[n].translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2); }
+  }
+  // 砂浜・広場用：パレットの緑を砂色に寄せた絵柄
+  const tune = (img, fn) => { const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height; const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0);
+    const dd = cx.getImageData(0, 0, cv.width, cv.height), pp = dd.data; for (let i = 0; i < pp.length; i += 4) { const o = fn(pp[i], pp[i + 1], pp[i + 2]); if (o) { pp[i] = o[0]; pp[i + 1] = o[1]; pp[i + 2] = o[2]; } }
+    cx.putImageData(dd, 0, 0); const t = new THREE.CanvasTexture(cv); t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; };
+  const palGreen = tune(pal.image, (r, g, b) => {              // 緑の色相を黄緑のほうへ寄せ、少し明るく
+    if (!(g > r + 8 && g > b + 8)) return null;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), v = mx / 255, sat = (mx - mn) / mx; let h = 60 * (((b - r) / (mx - mn)) + 2);
+    h = 82 + (h - 90) * .35; const S = Math.min(1, sat * 1.2), V = Math.min(1, v * 1.12), f = n => { const k = (n + h / 60) % 6; return (V - V * S * Math.max(0, Math.min(k, 4 - k, 1))) * 255; };
+    return [f(5), f(3), f(1)]; });
+  const c = document.createElement('canvas'); c.width = pal.image.width; c.height = pal.image.height;
+  const x = c.getContext('2d'); x.drawImage(pal.image, 0, 0); const d = x.getImageData(0, 0, c.width, c.height), q = d.data;
+  for (let i = 0; i < q.length; i += 4) {
+    const r = q[i], g = q[i + 1], b = q[i + 2];
+    if (g > r + 8 && g > b + 8) { const l = (r + g + b) / 3; q[i] = Math.min(255, l * 1.5 + 40); q[i + 1] = Math.min(255, l * 1.35 + 30); q[i + 2] = Math.min(255, l * .95 + 15); }
+  }
+  x.putImageData(d, 0, 0); const sandTex = new THREE.CanvasTexture(c); sandTex.flipY = false; sandTex.colorSpace = THREE.SRGBColorSpace;
+  const std = map => new THREE.MeshStandardMaterial({ map, metalness: 0, roughness: 1 });
+  return { G, mat: std(palGreen), matSand: std(sandTex) };
+}
+const TILES_FLAG = new URLSearchParams(location.search).get('tiles') === 'tinymen';
+const TM = TILES_FLAG ? await loadTinymen().catch(e => { console.info('Tinymen の素材を読み込めません。island/local-assets/README.md を参照', e); return null; }) : null;
+window.__tiles = TM ? 'on' : TILES_FLAG ? 'missing' : 'off';
+
+const land = (x, y) => at(tier, x, y) > 0 || at(sand, x, y);
+const wet = (x, y) => at(water, x, y);
+const HT = TM ? [.06, .5, 1, 1.5] : [.14, .4, 1.05, 1.7];         // 砂浜・1段目・2段目・3段目の高さ（タイル版は0.5刻み）
+const wx = x => x - W / 2 + .5, wz = y => y - H / 2 + .5;
+const bridge = (x, y) => wet(x, y) && at(road, x, y) && at(tier, x, y) > 0;
+const ground = (x, y) => HT[at(tier, Math.round(x), Math.round(y))] ?? HT[0];   // 歩く高さ
+const mat = (color, o = {}) => new THREE.MeshLambertMaterial({ color, ...o });
+const mesh = (geo, m, parent, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; o.receiveShadow = true; parent.add(o); return o; };
+
+// 海
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat('#6fc7c6')); sea.rotation.x = -Math.PI / 2; sea.receiveShadow = true; scene.add(sea);
+// 地面：1マス＝1つの箱。上面は明るく、側面（崖）は暗く
+const boxG = new THREE.BoxGeometry(1, 1, 1);
+{ const c = new Float32Array(72); for (let i = 0; i < 24; i++) { const top = i >= 8 && i < 12, v = top ? 1 : .68; c.set([v, v * (top ? 1 : .94), v * (top ? 1 : .86)], i * 3); }
+  boxG.setAttribute('color', new THREE.BufferAttribute(c, 3)); }
+const cells = []; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (land(x, y)) cells.push([x, y]);
+const terrain = new THREE.InstancedMesh(boxG, new THREE.MeshLambertMaterial({ vertexColors:true }), cells.length);
+terrain.receiveShadow = true; terrain.castShadow = true;
+const GRASSC = ['', '#7ccb6c', '#93d67a', '#aee28c'], M4 = new THREE.Matrix4(), C = new THREE.Color();
+cells.forEach(([x, y], i) => {
+  const t = at(tier, x, y), w = wet(x, y), top = (HT[t] ?? HT[0]) - (w ? .2 : 0);
+  M4.compose(new THREE.Vector3(wx(x), (top - 1.5) / 2, wz(y)), new THREE.Quaternion(), new THREE.Vector3(1, top + 1.5, 1));
+  terrain.setMatrixAt(i, M4);
+  C.set(w ? (t ? '#7fd9de' : '#6fc7c6') : !t ? '#f4e3b5' : at(plaza, x, y) ? '#ecdcb2' : at(road, x, y) ? '#e6d2a0' : GRASSC[t]);
+  if (t && !w && !at(road, x, y) && !at(plaza, x, y) && (x + y) % 2) C.multiplyScalar(.965);       // うっすら市松
+  terrain.setColorAt(i, C);
+});
+scene.add(terrain);
+
+if (TM) {
+  // 今までの箱は「タップ位置の判定」専用にして、見えるのはタイルだけにする
+  terrain.material = new THREE.MeshBasicMaterial({ visible: false }); terrain.castShadow = false; terrain.receiveShadow = false;
+  const S = .25, DIR = [[0, -1], [1, 0], [0, 1], [-1, 0]];             // N,E,S,W（時計まわり）。タイルは4×4なので1/4に縮める
+  const lv = (x, y) => (x < 0 || y < 0 || x >= W || y >= H || !land(x, y)) ? -1 : at(tier, x, y);   // 段の番号。海は -1
+  const inst = {}, put = (name, x, y, top, m, sandMat = false) => { (inst[(sandMat ? 'S:' : '') + name] ||= []).push([x, y, top, m]); };
+  const dirsWhere = (x, y, f) => DIR.map(([a, b], i) => f(x + a, y + b) ? i : -1).filter(i => i >= 0);
+  // 開いている辺の組から種類と回転を決める。回転0のとき End=S、Straight=N+S、Turn=S+W、Triad=Sだけ閉、Quad=4辺
+  const pick = dirs => {
+    const n = dirs.length, set = new Set(dirs);
+    if (n === 0) return null;
+    if (n === 1) return ['End', (2 - dirs[0] + 4) % 4];
+    if (n === 4) return ['Quad', 0];
+    if (n === 3) return ['Triad', (2 - [0, 1, 2, 3].find(i => !set.has(i)) + 4) % 4];
+    const [a, b] = dirs; if ((b - a) % 2 === 0) return ['Straight', set.has(0) ? 0 : 1];
+    return ['Turn', (2 - (set.has(0) && set.has(3) ? 3 : Math.min(a, b)) + 4) % 4];
+  };
+  // 崖：壁がE側に向くのが回転0。2辺が隣り合う角は CliffCorner（向きは目で確認して調整する）
+  const cliff = (x, y, exp, top) => {
+    const v = 'CliffTile_C';                                              // 縁がそろうよう1種類にする（A と C は同じ向き）
+    if (exp.length === 0) return ['GroundTile', 0];
+    if (exp.length === 2 && (exp[1] - exp[0]) % 2 !== 0) { const j = exp.includes(0) && exp.includes(3) ? 3 : exp[0]; return ['CliffCornerTile', (1 - j + 4) % 4]; }
+    return [v, (1 - exp[0] + 4) % 4];
+  };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!land(x, y)) continue;
+    const t = at(tier, x, y), isW = wet(x, y), isR = at(road, x, y) && !isW;
+    for (let j = 1; j < t; j++) { const [nm, m] = cliff(x, y, dirsWhere(x, y, (a, b) => lv(a, b) < j), j * .5); put(nm, x, y, j * .5, m); }   // 柱の途中
+    const top = t === 0 ? HT[0] : t * .5;
+    if (t === 0) {                                                       // 砂浜：海に面した辺で海岸タイルを選ぶ
+      const sea = dirsWhere(x, y, (a, b) => lv(a, b) < 0);
+      if (sea.length === 1) put('CoastTile_' + 'ABC'[(x * 5 + y * 3) % 3], x, y, top, (0 - sea[0] + 4) % 4);
+      else if (sea.length === 2 && (sea[1] - sea[0]) % 2 !== 0) put('CoastTurnTile', x, y, top, (0 - (sea.includes(0) && sea.includes(3) ? 3 : sea[0]) + 4) % 4);
+      else put('GroundTile', x, y, top, 0, true);
+    } else if (isW) {                                                    // 川・池（橋の下も）
+      const wd = dirsWhere(x, y, (a, b) => wet(a, b) && land(a, b));
+      const pk = wd.length >= 3 || wd.length === 0 ? null : pick(wd);
+      put(pk ? 'River' + pk[0] + 'Tile' : 'WaterTile', x, y, top, pk ? pk[1] : 0);
+    } else if (isR) {                                                    // 道：1段高い道が隣にあれば坂、なければ辺のつながりで選ぶ
+      const up = dirsWhere(x, y, (a, b) => at(road, a, b) && !wet(a, b) && lv(a, b) === t + 1);
+      if (up.length) put('RoadRampTile', x, y, top - .01, (3 - up[0] + 4) % 4);
+      else { const pk = pick(dirsWhere(x, y, (a, b) => at(road, a, b) && land(a, b))); put(pk ? 'Road' + pk[0] + 'Tile' : 'GroundTile', x, y, top, pk ? pk[1] : 0, !pk); }
+    } else if (at(plaza, x, y)) put('GroundTile', x, y, top, 0, true);
+    else { const [nm, m] = cliff(x, y, dirsWhere(x, y, (a, b) => lv(a, b) < t), top); put(nm, x, y, top, m); }
+  }
+  const Yax = new THREE.Vector3(0, 1, 0), Q = new THREE.Quaternion();
+  for (const [k, list] of Object.entries(inst)) {
+    const sandMat = k.startsWith('S:'), name = k.replace('S:', ''), im = new THREE.InstancedMesh(TM.G[name], sandMat ? TM.matSand : TM.mat, list.length);
+    list.forEach(([x, y, top, m], i) => im.setMatrixAt(i, M4.compose(new THREE.Vector3(wx(x), top, wz(y)), Q.setFromAxisAngle(Yax, m * Math.PI / 2), new THREE.Vector3(S, S, S))));
+    im.castShadow = true; im.receiveShadow = true; scene.add(im);
+  }
+  window.__tileCounts = Object.fromEntries(Object.entries(inst).map(([k, l]) => [k, l.length]));
+}
+// 浅瀬
+{ const coast = cells.filter(([x, y]) => [[1,0],[-1,0],[0,1],[0,-1]].some(([a, b]) => !land(x + a, y + b)));
+  const m = new THREE.InstancedMesh(new THREE.CircleGeometry(1.7, 20), new THREE.MeshBasicMaterial({ color:'#a6e3df' }), coast.length);
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+  coast.forEach(([x, y], i) => m.setMatrixAt(i, M4.compose(new THREE.Vector3(wx(x), .02, wz(y)), q, new THREE.Vector3(1, 1, 1)))); scene.add(m); }
+// 階段・橋
+const wood = mat('#c4925a'), woodD = mat('#8a623a'), stone = mat('#d8c391');
+for (let y = 1; y < H; y++) for (let x = 0; x < W; x++) {
+  if (!TM && at(road, x, y) && at(road, x, y - 1) && land(x, y) && at(tier, x, y - 1) > at(tier, x, y) && !wet(x, y)) {
+    const lo = ground(x, y), d = ground(x, y - 1) - lo;
+    for (let k = 0; k < 4; k++) mesh(new THREE.BoxGeometry(.8, d * (4 - k) / 4, .25), stone, scene, wx(x), lo + d * (4 - k) / 8, wz(y) - .375 + k * .25);
+  }
+  if (bridge(x, y)) {
+    const horiz = at(road, x - 1, y) || at(road, x + 1, y), g = new THREE.Group(); g.position.set(wx(x), ground(x, y), wz(y)); g.rotation.y = horiz ? 0 : Math.PI / 2; scene.add(g);
+    mesh(new THREE.BoxGeometry(1.02, .1, .8), wood, g, 0, -.02, 0);
+    for (const s of [-.4, .4]) mesh(new THREE.BoxGeometry(1.02, .06, .06), woodD, g, 0, .22, s);
+    for (const s of [-.4, .4]) for (const e of [-.45, .45]) mesh(new THREE.BoxGeometry(.07, .28, .07), woodD, g, e, .1, s);
+  }
+}
+// 岩場・桟橋・船
+const primDeco = [];                       // 素材が読めたら隠す、手作りの代用品
+const rockM = mat('#66737f');
+ROCKS.forEach(([x, y], i) => { const r = mesh(new THREE.DodecahedronGeometry(.75 + (i % 3) * .15), rockM, scene, wx(x), .15, wz(y)); r.rotation.set(i, i * 2, i * 3); r.scale.y = .7; primDeco.push(r); });
+mesh(new THREE.BoxGeometry(.7, .12, 3.2), wood, scene, wx(13), .3, wz(39.6));
+mesh(new THREE.BoxGeometry(2, .12, .7), wood, scene, wx(13), .3, wz(41));
+for (const [a, b] of [[12.75,38.5],[13.25,38.5],[12.2,41],[13.8,41],[12.75,40],[13.25,40]]) mesh(new THREE.CylinderGeometry(.07, .07, .7), woodD, scene, wx(a), .05, wz(b));
+const boat = new THREE.Group(); boat.position.set(wx(11.2), .12, wz(41)); scene.add(boat);
+mesh(new THREE.BoxGeometry(1.3, .28, .6), mat('#ffffff'), boat); mesh(new THREE.CylinderGeometry(.03, .03, 1), woodD, boat, 0, .6, 0);
+{ const s = mesh(new THREE.ConeGeometry(.42, .8, 3), mat('#d9534a'), boat, .18, .7, 0); s.scale.z = .08; }
+
+// 木
+let seed = 20261112; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+const busy = grid(0);
+HOUSES.forEach(h => h.at.forEach(([x, y]) => paint(busy, [[x, y, 1, 1]], 1)));
+BUILDINGS.forEach(b => paint(busy, [[Math.floor(b.x) - 1, Math.floor(b.y) - 1, 3, 3]], 1));
+SIGNS.forEach(([x, y]) => paint(busy, [[x, y, 1, 1]], 1));
+const treeAt = [], flowerAt = [];
+for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+  const r = rnd(), jx = (rnd() - .5) * .3, jz = (rnd() - .5) * .3;
+  if (!at(tier, x, y) || wet(x, y) || at(road, x, y) || at(plaza, x, y) || at(busy, x, y) || r > .34) continue;
+  (r < .05 ? flowerAt : treeAt).push([wx(x) + jx, ground(x, y), wz(y) + jz, .8 + rnd() * .5]);
+}
+{ const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.07, .1, .5, 6), mat('#8a623a'), treeAt.length);
+  const leaf = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.42, 1), mat('#3d9a57', { flatShading:true }), treeAt.length);
+  const leaf2 = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.3, 1), mat('#55b266', { flatShading:true }), treeAt.length);
+  const q = new THREE.Quaternion();
+  treeAt.forEach(([x, y, z, s], i) => {
+    trunk.setMatrixAt(i, M4.compose(new THREE.Vector3(x, y + .25, z), q, new THREE.Vector3(1, 1, 1)));
+    leaf.setMatrixAt(i, M4.compose(new THREE.Vector3(x, y + .5 + .34 * s, z), q, new THREE.Vector3(s, s, s)));
+    leaf2.setMatrixAt(i, M4.compose(new THREE.Vector3(x, y + .5 + .72 * s, z), q, new THREE.Vector3(s, s, s)));
+  });
+  for (const m of [trunk, leaf, leaf2]) { m.castShadow = true; m.receiveShadow = true; scene.add(m); primDeco.push(m); }
+  const fl = new THREE.InstancedMesh(new THREE.SphereGeometry(.08, 8, 6), new THREE.MeshLambertMaterial(), flowerAt.length * 3);
+  flowerAt.forEach(([x, y, z], i) => [['#ff9db0', -.2, 0], ['#ffffff', .15, -.12], ['#ffd166', .1, .2]].forEach(([c, a, b], k) => {
+    fl.setMatrixAt(i * 3 + k, M4.compose(new THREE.Vector3(x + a, y + .1, z + b), q, new THREE.Vector3(1, 1, 1))); fl.setColorAt(i * 3 + k, C.set(c)); }));
+  scene.add(fl); }
+
+if (TM) {
+  let r = 11; const rr = () => (r = (r * 16807) % 2147483647) / 2147483647;
+  const want = {};                                                     // 種類ごとの配置リスト
+  const add = (name, x, y, z, size) => (want[name] ||= []).push([x, y, z, size, rr() * Math.PI * 2]);
+  treeAt.forEach(([x, y, z], i) => {
+    const t = at(tier, Math.round((x + W / 2 - .5)), Math.round((z + H / 2 - .5)));
+    if (i % 4 === 0) add(['Bush_A', 'Bush_C', 'BerryBush_A'][i % 3 === 0 ? 0 : i % 3], x, y, z, .25 * 1.5);
+    else if (i % 11 === 5) add('Rock_A', x, y, z, .25 * 1.3);
+    else add(t >= 3 ? ['PineTree_A', 'PineTree_B'][i % 2] : ['ForestTree_A', 'ForestTree_B', 'PineTree_A'][i % 3], x, y, z, .25 * (.85 + rr() * .3));
+  });
+  ROCKS.forEach(([x, y], i) => add(['Rock_A', 'Rock_B'][i % 2], wx(x), HT[0], wz(y), .25 * 1.6));
+  for (const [name, list] of Object.entries(want)) {
+    const im = new THREE.InstancedMesh(TM.G[name], TM.mat, list.length);
+    list.forEach(([x, y, z, k, yaw], i) => im.setMatrixAt(i, M4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(k, k, k))));
+    im.castShadow = true; im.receiveShadow = true; scene.add(im);
+  }
+  primDeco.forEach(q => { q.visible = false; });
+}
+
+/* ============ 建物・家 ============ */
+const spots = [], solid = [], spotAt = new Map(), key = (x, y) => y * W + x;
+const cream = mat('#fff5e0'), doorM = mat('#8a623a'), glass = mat('#bfe6f2');
+const mkSpot = (info, anchors, x, y, z) => {
+  const g = new THREE.Group(); g.position.set(x, y, z); g.userData = { info, anchors, base:y }; scene.add(g); spots.push(g);
+  anchors.forEach(([a, b]) => spotAt.set(key(a, b), g)); return g;
+};
+const roofG = new THREE.ConeGeometry(.56, .58, 4); roofG.rotateY(Math.PI / 4);
+const house = (g, color) => {
+  mesh(new THREE.BoxGeometry(.66, .44, .6), cream, g, 0, .22, 0);
+  mesh(roofG, mat(color), g, 0, .73, 0);
+  mesh(new THREE.BoxGeometry(.16, .26, .04), doorM, g, 0, .13, .31);
+};
+const building = (g, color, big) => {
+  const w = big ? 2.4 : 1.4, h = big ? 1 : .8, d = big ? 1.3 : 1, cm = mat(color);
+  mesh(new THREE.BoxGeometry(w, h, d), cream, g, 0, h / 2, 0);
+  const r = mesh(roofG, cm, g, 0, h + .36, 0); r.scale.set(w * 1.02, 1.25, d * 1.05);
+  mesh(new THREE.BoxGeometry(.3, .5, .05), doorM, g, 0, .25, d / 2 + .01);
+  for (const s of [-1, 1]) mesh(new THREE.BoxGeometry(.24, .24, .05), glass, g, s * w * .3, h * .55, d / 2 + .01);
+  if (big) {
+    mesh(new THREE.BoxGeometry(.6, 1.1, .6), cream, g, 0, h + .75, 0);
+    const t = mesh(roofG, cm, g, 0, h + 1.62, 0); t.scale.set(.8, 1.1, .8);
+    mesh(new THREE.CylinderGeometry(.17, .17, .05, 20).rotateX(Math.PI / 2), mat('#ffffff'), g, 0, h + .95, .31);
+  } else {
+    mesh(new THREE.CylinderGeometry(.03, .03, 1.1), doorM, g, w / 2 - .12, h + .55, -d / 2 + .12);
+    mesh(new THREE.BoxGeometry(.42, .26, .03), cm, g, w / 2 + .12, h + .95, -d / 2 + .12);
+  }
+};
+const labels = [];
+const label = (text, size = 1) => {              // 文字は板に描いて常にこちらを向かせる
+  const c = document.createElement('canvas'), k = c.getContext('2d'), f = '800 56px "Hiragino Maru Gothic ProN","Zen Maru Gothic","Yu Gothic","Noto Sans JP",sans-serif';
+  k.font = f; c.width = Math.ceil(k.measureText(text).width) + 40; c.height = 84;
+  k.font = f; k.textAlign = 'center'; k.textBaseline = 'middle'; k.lineJoin = 'round'; k.lineWidth = 14; k.strokeStyle = '#fffaf0'; k.strokeText(text, c.width / 2, 44);
+  k.fillStyle = '#3b3226'; k.fillText(text, c.width / 2, 44);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:t, depthTest:false, transparent:true })); s.renderOrder = 10;
+  s.userData.size = [c.width / 84 * .62 * size, .62 * size]; labels.push(s); return s;
+};
+HOUSES.forEach(h => h.at.forEach(([x, y], i) => {
+  const d = DEPTS[h.dept], who = h.note || d.name;
+  const g = mkSpot({ dept:h.dept, label:`${who}メンバーの部屋 #${i + 1}`,
+    desc:'メンバー1人1人の部屋。本人が自由に飾れる。',
+    todo:['自分の担当タスク（やること／進行中／完了）','もらった「ありがとう」やバッジを飾る棚','自分の times へのポスト'] }, [[x, y]], wx(x), ground(x, y), wz(y));
+  house(g, h.note ? '#8f745e' : d.color); g.userData.kind = 'house'; g.userData.idx = i; g.userData.prim = [...g.children]; solid.push([x, y]);
+}));
+BUILDINGS.forEach(b => {
+  const ax = Math.floor(b.x), ay = Math.floor(b.y), g = mkSpot(b, [[ax, ay]], wx(b.x), ground(ax, ay), wz(ay));
+  building(g, DEPTS[b.dept].color, b.big); g.userData.kind = 'hall'; g.userData.prim = [...g.children]; solid.push([ax, ay]); if (b.big) solid.push([ax - 1, ay], [ax + 1, ay]);
+  const l = label(b.label, b.big ? 1.25 : 1.05); l.position.set(0, b.big ? 3.3 : 2.35, 0); g.add(l);
+});
+const timesG = mkSpot(ZONES.times, SIGNS, 0, 0, 0);
+SIGNS.forEach(([x, y], i) => {
+  mesh(new THREE.CylinderGeometry(.035, .035, .5), woodD, timesG, wx(x), ground(x, y) + .25, wz(y));
+  mesh(new THREE.BoxGeometry(.5, .32, .05), mat(['#ffffff', '#ffe9a8', '#d6f0ff'][i % 3]), timesG, wx(x), ground(x, y) + .55, wz(y));
+});
+{ const l = label(ZONES.times.label, .9); l.position.set(wx(13), ground(13, 30) + 1.5, wz(30)); timesG.add(l); }
+const circleG = mkSpot(ZONES.circle, TENTS.map(([x, y]) => [Math.round(x), Math.round(y)]), 0, 0, 0);
+TENTS.forEach(([x, y, c]) => { const t = mesh(new THREE.ConeGeometry(.55, .75, 4), mat(c, { flatShading:true }), circleG, wx(x), ground(22, 32) + .37, wz(y)); t.rotation.y = Math.PI / 4; primDeco.push(t); });
+{ const l = label(ZONES.circle.label, .9); l.position.set(wx(22), ground(22, 32) + 1.7, wz(32.5)); circleG.add(l); }
+const pierG = mkSpot(ZONES.pier, [[13, 38]], 0, 0, 0);
+{ const l = label(ZONES.pier.label, .9); l.position.set(wx(13), 1.5, wz(40.5)); pierG.add(l); }
+
+/* ============ 素材（KayKit・CC0）に差し替え ============
+   建物・家・住民・木・屋台・雲を読み込む。失敗したら上の手作りの形のまま動く。?plain で素材なし */
+const mixers = [], clouds = []; let playerAnim = null, bobAmp = .07;
+const useKit = async () => {
+  const gl = new GLTFLoader(), lib = {}, COLS = ['red', 'blue', 'green', 'yellow'];
+  const files = [
+    ...['home_A', 'home_B', 'market'].flatMap(n => COLS.map(c => `building_${n}_${c}.gltf`)),
+    'building_church_red.gltf', 'building_windmill_red.gltf', 'building_blacksmith_blue.gltf', 'building_barracks_blue.gltf', 'building_castle_green.gltf', 'building_well_blue.gltf',
+    ...['barrel', 'crate_A_small', 'wheelbarrow', 'sack', 'bucket_water', 'cloud_big', 'cloud_small'].map(n => n + '.gltf'),
+    ...['Tree_1_A', 'Tree_2_A', 'Tree_2_C', 'Tree_3_A', 'Tree_4_A', 'Bush_1_A', 'Bush_2_A', 'Bush_4_A', 'Rock_1_A', 'Rock_2_A', 'Rock_3_A'].map(n => n + '_Color1.gltf'),
+    'Knight.glb', 'Mage.glb', 'Rogue.glb', 'Rogue_Hooded.glb', 'Barbarian.glb', 'Ranger.glb', 'Rig_Medium_General.glb', 'Rig_Medium_MovementBasic.glb'];
+  await Promise.all(files.map(f => gl.loadAsync(`./models/kk/${f}`).then(g => { lib[f] = g; })));
+
+  // 屋根の色だけ入れ替えた絵柄（紫・灰色）を作る。赤→紫、青→灰色
+  const atlas = (() => { let t; lib['building_home_A_red.gltf'].scene.traverse(m => { if (m.isMesh && !t) t = m.material.map; }); return t; })();
+  const recolor = fn => {
+    const img = atlas.image, c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0); const d = x.getImageData(0, 0, c.width, c.height), p = d.data;
+    for (let i = 0; i < p.length; i += 4) {
+      const r = p[i] / 255, g = p[i + 1] / 255, b = p[i + 2] / 255, mx = Math.max(r, g, b), mn = Math.min(r, g, b), v = mx, sat = mx ? (mx - mn) / mx : 0;
+      let h = 0; if (mx !== mn) { const dd = mx - mn; h = mx === r ? ((g - b) / dd) % 6 : mx === g ? (b - r) / dd + 2 : (r - g) / dd + 4; h = (h * 60 + 360) % 360; }
+      const o = fn(h, sat, v); if (!o) continue;
+      const [H, S, V] = o, f = n => { const k = (n + H / 60) % 6; return V - V * S * Math.max(0, Math.min(k, 4 - k, 1)); };
+      p[i] = f(5) * 255; p[i + 1] = f(3) * 255; p[i + 2] = f(1) * 255;
+    }
+    x.putImageData(d, 0, 0); const t = new THREE.CanvasTexture(c); t.flipY = atlas.flipY; t.colorSpace = atlas.colorSpace; t.anisotropy = atlas.anisotropy; return t;
+  };
+  const PURPLE = recolor((h, s, v) => (h >= 340 || h <= 14) && s > .4 ? [282, s * .85, v * .95] : null);
+  const GREY = recolor((h, s, v) => h >= 185 && h <= 245 && s > .3 ? [h, s * .1, v * .98] : null);
+
+  // 高さまたは幅をそろえ、足もとを原点に置いた複製を作る
+  const make = (file, size, mode = 'w', tex = null) => {
+    const o = lib[file].scene.clone(true);
+    o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.material = m.material.clone(); m.material.metalness = 0; m.material.roughness = 1; if (tex) m.material.map = tex; } });
+    const b = new THREE.Box3().setFromObject(o), c = b.getCenter(new THREE.Vector3()), h = b.max.y - b.min.y;
+    const k = mode === 'h' ? size / h : size / Math.max(b.max.x - b.min.x, b.max.z - b.min.z), g = new THREE.Group();
+    o.scale.setScalar(k); o.position.set(-c.x * k, -b.min.y * k, -c.z * k); g.add(o); g.userData.h = h * k; return g;
+  };
+  const rr = (() => { let r = 7; return () => (r = (r * 16807) % 2147483647) / 2147483647; })();
+
+  // 部門ごとの建物と家
+  const KIT = {
+    policy:{ hall:'building_church_red.gltf',     house:['building_home_A_red.gltf', 'building_home_B_red.gltf'] },
+    pr:    { hall:'building_market_yellow.gltf',  house:['building_home_A_yellow.gltf', 'building_home_B_yellow.gltf'] },
+    eng:   { hall:'building_blacksmith_blue.gltf',house:['building_home_A_blue.gltf', 'building_home_B_blue.gltf'] },
+    plan:  { hall:'building_windmill_red.gltf',   house:['building_home_A_red.gltf', 'building_home_B_red.gltf'], tex:PURPLE },
+    office:{ hall:'building_barracks_blue.gltf',  house:['building_home_A_blue.gltf', 'building_home_B_blue.gltf'], tex:GREY },
+    all:   { hall:'building_castle_green.gltf',   house:['building_home_A_green.gltf', 'building_home_B_green.gltf'] },
+  };
+  spots.forEach(g => {
+    const u = g.userData; if (!u.kind) return; const k = KIT[u.info.dept], isHouse = u.kind === 'house';
+    const m = make(isHouse ? k.house[u.idx % 2] : k.hall, isHouse ? 1.25 : u.info.big ? 3.1 : u.info.dept === 'plan' ? 1.9 : 2.1, 'w', k.tex || null);
+    m.rotation.y = isHouse ? ((u.idx * 37) % 5 - 2) * .07 : 0; g.add(m); u.prim.forEach(q => { q.visible = false; });
+    const lab = g.children.find(c => c.isSprite); if (lab) lab.position.y = m.userData.h + .5;
+  });
+  // サークル広場：色ちがいの屋台
+  circleG.children.forEach(c => { if (c.isMesh) c.visible = false; });
+  [['building_market_red.gltf', null], ['building_market_blue.gltf', null], ['building_market_green.gltf', null], ['building_market_yellow.gltf', null], ['building_market_red.gltf', PURPLE]].forEach(([f, t], i) => {
+    const [x, y] = TENTS[i], m = make(f, 1.35, 'w', t); m.position.set(wx(x), ground(22, 32), wz(y)); m.rotation.y = (i - 2) * .25; circleG.add(m); });
+  // 木・茂み・岩
+  const TREES = ['Tree_1_A_Color1.gltf', 'Tree_2_A_Color1.gltf', 'Tree_2_C_Color1.gltf', 'Tree_3_A_Color1.gltf', 'Tree_4_A_Color1.gltf'], BUSH = ['Bush_1_A_Color1.gltf', 'Bush_2_A_Color1.gltf', 'Bush_4_A_Color1.gltf'];
+  const put = (m, x, y, z, yaw = 0) => { m.position.set(x, y, z); m.rotation.y = yaw; scene.add(m); return m; };
+  let n = 0;
+  if (!TM) {
+    treeAt.forEach(([x, y, z]) => { n++;
+      if (n % 4 === 0) put(make(BUSH[n % 3], .5 + rr() * .15, 'h'), x, y, z, rr() * 6);
+      else put(make(TREES[n % 5], (.95 + rr() * .4), 'h'), x, y, z, rr() * 6); });
+    ROCKS.forEach(([x, y], i) => put(make(['Rock_1_A_Color1.gltf', 'Rock_2_A_Color1.gltf', 'Rock_3_A_Color1.gltf'][i % 3], .85, 'w'), wx(x), .05, wz(y), i));
+  }
+  primDeco.forEach(q => { q.visible = false; });
+  // 小物（建物のそば）
+  [['barrel.gltf', 15.6, 11.2, .32], ['crate_A_small.gltf', 13.4, 11.4, .34], ['wheelbarrow.gltf', 24.2, 5.4, .5], ['crate_A_small.gltf', 26.6, 5.6, .34], ['sack.gltf', 7.2, 29.8, .3], ['barrel.gltf', 5.0, 29.6, .32],
+   ['barrel.gltf', 22.4, 24.6, .32], ['bucket_water.gltf', 9.6, 19.4, .3], ['building_well_blue.gltf', 15.2, 21.4, .8], ['crate_A_small.gltf', 11.6, 21.4, .34]]
+    .forEach(([f, x, y, size], i) => put(make(f, size, 'w'), wx(x), ground(x, y), wz(y), i * 1.7));
+  // 雲
+  for (let i = 0; i < 7; i++) {
+    const c = make(i % 2 ? 'cloud_big.gltf' : 'cloud_small.gltf', 3 + rr() * 2.5, 'w'); c.traverse(m => { if (m.isMesh) { m.castShadow = false; m.receiveShadow = false; } });
+    put(c, -34 + rr() * 68, 11 + rr() * 4, -26 + rr() * 52, rr() * 6); c.userData.v = .25 + rr() * .35; clouds.push(c);
+  }
+  // 住民と主人公（骨入りのキャラクター）
+  const clips = [...lib['Rig_Medium_General.glb'].animations, ...lib['Rig_Medium_MovementBasic.glb'].animations], clip = nm => clips.find(a => a.name === nm);
+  const spawn = (file, height) => {
+    const o = SkeletonUtils.clone(lib[file].scene);
+    o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; m.material = m.material.clone(); m.material.metalness = 0; m.material.roughness = 1; } });
+    const b = new THREE.Box3().setFromObject(o), k = height / (b.max.y - b.min.y); o.scale.setScalar(k); o.position.y = -b.min.y * k;
+    const g = new THREE.Group(); g.add(o); const mx = new THREE.AnimationMixer(o); mixers.push(mx); return { g, mx };
+  };
+  [['Knight.glb', 15.5, 21.8, 3.4], ['Rogue_Hooded.glb', 24.6, 6.6, 3.0], ['Barbarian.glb', 7.6, 30.4, 3.8], ['Ranger.glb', 25.6, 24.6, 2.6], ['Rogue.glb', 12.0, 11.6, 3.2]].forEach(([f, x, y, yaw]) => {
+    const c = spawn(f, .92), a = c.mx.clipAction(clip('Idle_A')); a.time = rr() * 3; a.play(); put(c.g, wx(x), ground(x, y), wz(y), yaw); });
+  const pl = spawn('Mage.glb', .98); meG.children.forEach(q => { q.visible = false; }); meG.add(pl.g);
+  const idle = pl.mx.clipAction(clip('Idle_A')), walk = pl.mx.clipAction(clip('Walking_A')); walk.timeScale = 1.7; idle.play(); let cur = idle;
+  playerAnim = moving => { const nx = moving ? walk : idle; if (cur !== nx) { nx.reset().fadeIn(.15).play(); cur.fadeOut(.15); cur = nx; } };
+  bobAmp = 0;
+};
+window.__kit = 'loading';
+
+/* ============ 歩く・触れる ============ */
+const block = grid(0); solid.forEach(([x, y]) => { if (block[y]) block[y][x] = 1; });
+const lvl = (x, y) => Math.max(1, at(tier, x, y));
+const walkable = (x, y) => x >= 0 && y >= 0 && x < W && y < H && land(x, y) && !at(block, x, y) && (!wet(x, y) || at(road, x, y));
+// 段差は階段でしか越えられない。川は橋でしか渡れない
+const canStep = (ax, ay, bx, by) => walkable(bx, by) && (lvl(ax, ay) === lvl(bx, by) || (at(road, ax, ay) && at(road, bx, by)));
+const route = (from, goal) => {
+  const prev = new Map([[key(...from), null]]), q = [from];
+  while (q.length) {
+    const [x, y] = q.shift();
+    if (goal(x, y)) { const out = []; for (let k = key(x, y); k !== null; k = prev.get(k)) out.unshift([k % W, Math.floor(k / W)]); return out; }
+    for (const [dx, dy] of [[0,1],[1,0],[0,-1],[-1,0]]) {
+      const nx = x + dx, ny = y + dy;
+      if (!prev.has(key(nx, ny)) && canStep(x, y, nx, ny)) { prev.set(key(nx, ny), key(x, y)); q.push([nx, ny]); }
+    }
+  }
+  return null;
+};
+const me = { x:13, y:37, fx:13, fy:37, path:[], then:null, t:0 };
+const meG = new THREE.Group(); scene.add(meG);
+mesh(new THREE.CapsuleGeometry(.17, .2, 4, 12), mat('#ffd166'), meG, 0, .3, 0);
+mesh(new THREE.SphereGeometry(.21, 20, 14), mat('#ffe3c9'), meG, 0, .72, 0);
+mesh(new THREE.SphereGeometry(.225, 20, 10, 0, Math.PI * 2, 0, Math.PI * .5), mat('#5a4636'), meG, 0, .76, -.05).rotation.x = -.35;
+for (const s of [-.07, .07]) mesh(new THREE.SphereGeometry(.025, 8, 6), mat('#3b3226'), meG, s, .7, .2);
+
+const sheet = document.getElementById('sheet'), act = document.getElementById('act');
+const closeSheet = () => sheet.classList.remove('open');
+const near = () => {
+  let best = null, bd = 9;
+  spots.forEach(g => g.userData.anchors.forEach(([x, y]) => { const d = Math.max(Math.abs(x - me.x), Math.abs(y - me.y)); if (d <= 1 && d < bd) { bd = d; best = g; } }));
+  return best;
+};
+const refreshAct = () => {
+  const g = !intro.on && !me.path.length && !sheet.classList.contains('open') && near();
+  act.hidden = !g; if (g) { act.textContent = `▶ ${g.userData.info.label}`; act.onclick = () => open(g.userData.info); }
+};
+const open = info => {
+  const d = DEPTS[info.dept];
+  sheet.style.setProperty('--c', d.color);
+  sheet.innerHTML = `<button class="close" aria-label="閉じる">✕</button><span class="tag">${d.name}</span>
+    <h2>${info.label}</h2><p>${info.desc}</p><ul>${info.todo.map(t => `<li>${t}</li>`).join('')}</ul>
+    <div class="note">※ 試作のため中身は「ここに入れるもの」の案です。まだアクションボードとはつながっていません。</div>`;
+  sheet.classList.add('open'); act.hidden = true; sfx.open();
+  sheet.querySelector('.close').onclick = () => { closeSheet(); sfx.close(); refreshAct(); };
+};
+const go = (path, then) => {
+  if (!path) return false;
+  me.path = path.slice(1); me.then = then || null; me.t = 0; me.fx = me.x; me.fy = me.y;
+  closeSheet(); act.hidden = true;
+  if (!me.path.length) { const f = me.then; me.then = null; if (f) f(); refreshAct(); }
+  return true;
+};
+const visit = g => {
+  const A = g.userData.anchors;
+  if (!go(route([me.x, me.y], (x, y) => A.some(([ax, ay]) => Math.max(Math.abs(ax - x), Math.abs(ay - y)) <= 1)), () => open(g.userData.info))) open(g.userData.info);
+};
+
+/* ============ 効果音（すべてコードで合成。音声ファイルなし） ============ */
+let AC = null, master = null, muted = false;
+try { muted = localStorage.getItem('island-mute') === '1'; } catch {}
+const sndBtn = document.getElementById('snd');
+const showMute = () => { sndBtn.textContent = muted ? '×' : '♪'; if (master) master.gain.value = muted ? 0 : 1; };
+const audio = () => {                          // 最初のタップで音を有効にする（ブラウザの決まり）
+  if (AC) return AC;
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; }
+  master = AC.createGain(); master.connect(AC.destination); showMute();
+  const n = AC.sampleRate * 2, buf = AC.createBuffer(1, n, AC.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const src = AC.createBufferSource(), lp = AC.createBiquadFilter(), g = AC.createGain(), lfo = AC.createOscillator(), lg = AC.createGain();
+  src.buffer = buf; src.loop = true; lp.type = 'lowpass'; lp.frequency.value = 420; g.gain.value = .035;      // 波の音
+  lfo.frequency.value = .14; lg.gain.value = .025; lfo.connect(lg); lg.connect(g.gain);
+  src.connect(lp); lp.connect(g); g.connect(master); src.start(); lfo.start();
+  return AC;
+};
+const tone = (f0, f1, dur, vol, type = 'sine', delay = 0) => {
+  if (!AC) return; const t = AC.currentTime + delay, o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + .02);
+};
+const sfx = {
+  step:  () => tone(170 + Math.random() * 40, 90, .07, .09, 'triangle'),
+  open:  () => { tone(660, 660, .16, .08); tone(880, 880, .22, .08, 'sine', .1); tone(1320, 1320, .3, .05, 'sine', .2); },
+  close: () => tone(520, 300, .1, .06),
+  pop:   () => tone(420, 760, .09, .05, 'triangle'),
+};
+sndBtn.onclick = () => { audio(); muted = !muted; try { localStorage.setItem('island-mute', muted ? '1' : '0'); } catch {} showMute(); if (!muted) sfx.pop(); };
+showMute();
+
+/* ============ オープニング（秒単位のタイムライン） ============
+   0.0–1.5秒  夜明け色の空。真上寄りの遠景に島の名前が出る
+   1.5–5.0秒  カメラが回りながら降りる。空が朝から昼へ。家と建物が順に立ち上がる
+   5.0–7.0秒  船着き場の自分まで寄る。名前が消えて操作ボタンが出る                 */
+const HOLD = Number(new URLSearchParams(location.search).get('introAt')) || 0;
+const INTRO = 7, titleEl = document.getElementById('title');
+const intro = { t:0, on:!new URLSearchParams(location.search).has('nointro') && !matchMedia('(prefers-reduced-motion: reduce)').matches };
+if (intro.on) { document.body.classList.add('intro'); titleEl.classList.add('show'); }
+const ease = t => t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t), span = (t, a, b) => ease((t - a) / (b - a));
+const DAWN = new THREE.Color('#ffc9a8'), DAY = new THREE.Color('#bfe9f2'), SUN0 = new THREE.Color('#ff9f6b'), SUN1 = new THREE.Color('#fff3d6'),
+  HEMI0 = new THREE.Color('#ffb8a0'), HEMI1 = new THREE.Color('#ffffff'), SEA0 = new THREE.Color('#e3a58f'), SEA1 = new THREE.Color('#6fc7c6');
+const popIn = (t, i) => { const k = (t - 1.6 - i * .055) / .45; return k <= 0 ? 0 : k >= 1 ? 1 : 1 + 1.4 * Math.sin(k * Math.PI) * (1 - k) * .5 - (1 - k) ** 3; };
+let popped = -1;
+const runIntro = dt => {
+  intro.t = HOLD || intro.t + dt; const t = intro.t;        // ?introAt=3.2 でその時点のコマに固定（確認・書き出し用）
+  cam.dist = 104 - 56 * span(t, 1.5, 5) - 31 * span(t, 5, 7);
+  cam.az = -.7 + .55 * span(t, 1.5, 5) + .15 * span(t, 5, 7);
+  scene.background.copy(DAWN).lerp(DAY, span(t, 1.5, 5)); scene.fog.color.copy(scene.background);
+  sun.color.copy(SUN0).lerp(SUN1, span(t, 1.5, 5)); sun.intensity = 1.5 + .6 * span(t, 1.5, 5);
+  hemi.color.copy(HEMI0).lerp(HEMI1, span(t, 1.5, 5)); sea.material.color.copy(SEA0).lerp(SEA1, span(t, 1.5, 5));
+  labels.forEach(l => { l.material.opacity = span(t, 5, 6); });
+  const n = Math.min(spots.length - 1, Math.floor((t - 1.6) / .055)); if (n > popped && n % 4 === 0) sfx.pop(); popped = Math.max(popped, n);
+  if (t > 3.9) titleEl.classList.remove('show');
+  if (t >= INTRO) { intro.on = false; cam.dist = 17; cam.az = 0; scene.background.copy(DAY); scene.fog.color.copy(DAY); sun.color.copy(SUN1); sun.intensity = 2.1; hemi.color.copy(HEMI1); sea.material.color.copy(SEA1); labels.forEach(l => { l.material.opacity = 1; });
+    document.body.classList.remove('intro'); titleEl.classList.remove('show'); refreshAct(); }
+};
+
+/* ============ カメラと入力 ============ */
+const cam = { dist:17, az:0, target:new THREE.Vector3(wx(13), 0, wz(37)) };
+const resize = () => { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); };
+addEventListener('resize', resize); resize();
+const zoomBy = k => { cam.dist = Math.max(8, Math.min(95, cam.dist * k)); };
+document.getElementById('zin').onclick = () => { audio(); sfx.pop(); zoomBy(.7); };
+document.getElementById('zout').onclick = () => { audio(); sfx.pop(); zoomBy(1.45); };
+canvas.addEventListener('wheel', e => { e.preventDefault(); zoomBy(e.deltaY > 0 ? 1.1 : .9); }, { passive:false });
+const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+const tap = (cx, cy) => {
+  audio();
+  if (intro.on) { intro.t = INTRO; return; }
+  if (sheet.classList.contains('open')) { closeSheet(); sfx.close(); refreshAct(); return; }
+  const r = canvas.getBoundingClientRect(); ptr.set((cx - r.left) / r.width * 2 - 1, -(cy - r.top) / r.height * 2 + 1);
+  ray.setFromCamera(ptr, camera);
+  const hitS = ray.intersectObjects(spots, true).find(h => !h.object.isSprite);
+  const hitT = ray.intersectObject(terrain)[0];
+  if (hitS && (!hitT || hitS.distance < hitT.distance + .5)) { let o = hitS.object; while (o && !o.userData.info) o = o.parent; if (o) return visit(o); }
+  if (!hitT) return;
+  const [tx, ty] = cells[hitT.instanceId], s = spotAt.get(key(tx, ty));
+  if (s && at(block, tx, ty)) return visit(s);
+  go(route([me.x, me.y], (x, y) => x === tx && y === ty));
+};
+const pts = new Map(); let drag = null, pinch = 0;
+canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); pts.set(e.pointerId, e); drag = { x:e.clientX, y:e.clientY, az:cam.az, moved:pts.size > 1 }; pinch = 0; });
+canvas.addEventListener('pointermove', e => {
+  if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, e);
+  if (pts.size === 2) {                                   // 2本指で拡大縮小
+    const [a, b] = [...pts.values()], d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (pinch) zoomBy(pinch / d); pinch = d; drag.moved = true; return;
+  }
+  if (drag && Math.abs(e.clientX - drag.x) > 8) { drag.moved = true; cam.az = drag.az - (e.clientX - drag.x) * .006; }
+});
+const up = e => { if (!pts.delete(e.pointerId)) return; if (drag && !drag.moved && e.type === 'pointerup') tap(e.clientX, e.clientY); if (!pts.size) drag = null; pinch = 0; };
+canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+addEventListener('keydown', e => {
+  const d = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0], w:[0,-1], s:[0,1], a:[-1,0], d:[1,0] }[e.key];
+  if (d) { e.preventDefault(); if (!me.path.length && canStep(me.x, me.y, me.x + d[0], me.y + d[1])) go([[me.x, me.y], [me.x + d[0], me.y + d[1]]]); }
+  else if ((e.key === 'Enter' || e.key === ' ') && !act.hidden) { e.preventDefault(); act.click(); }
+  else if (e.key === 'Escape') { closeSheet(); refreshAct(); }
+});
+
+// 部門でしぼりこみ
+const chips = document.getElementById('chips'); let current = null;
+Object.entries(DEPTS).forEach(([id, d]) => {
+  const b = document.createElement('button');
+  b.className = 'chip'; b.style.setProperty('--c', d.color); b.setAttribute('aria-pressed', 'false'); b.innerHTML = `<i></i>${d.name}`;
+  b.onclick = () => { current = current === id ? null : id; chips.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(c === b && !!current))); };
+  chips.appendChild(b);
+});
+// 持ち物（＝自分のタスク）。中身はサンプル
+const BAG = [
+  { icon:'📝', name:'論点メモを書く', from:'政策立案の館' },
+  { icon:'📣', name:'告知文を確認する', from:'広報スタジオ' },
+  { icon:'🗓', name:'定例の日程を決める', from:'みんなの集会所' },
+];
+document.getElementById('bag').onclick = () => {
+  sheet.style.setProperty('--c', '#8f745e');
+  sheet.innerHTML = `<button class="close" aria-label="閉じる">✕</button><span class="tag">持ち物</span>
+    <h2>いま持っているタスク</h2><p>建物で受け取ったタスクを持ち歩き、終わったら建物に届ける、という使い方の案。</p>
+    <div class="slots">${Array.from({ length:8 }, (_, i) => BAG[i]
+      ? `<div class="slot"><b>${BAG[i].icon}</b><span>${BAG[i].name}</span><small>${BAG[i].from}</small></div>` : '<div class="slot empty"></div>').join('')}</div>
+    <div class="note">※ 中身はサンプルです。まだアクションボードとはつながっていません。</div>`;
+  sheet.classList.add('open'); act.hidden = true;
+  sheet.querySelector('.close').onclick = () => { closeSheet(); refreshAct(); };
+};
+
+/* ============ 毎フレームの更新 ============ */
+const clock = new THREE.Clock(), center = new THREE.Vector3(0, 0, 0), want = new THREE.Vector3();
+const frame = () => {
+  const dt = Math.min(.25, clock.getDelta()), now = clock.elapsedTime;
+  if (intro.on) runIntro(dt);
+  mixers.forEach(m => m.update(dt)); if (playerAnim) playerAnim(me.path.length > 0);
+  clouds.forEach(c => { c.position.x += dt * c.userData.v; if (c.position.x > 40) c.position.x = -40; });
+  if (me.path.length) {
+    const [nx, ny] = me.path[0]; me.t = Math.min(1, me.t + dt / .16);
+    const px = me.fx + (nx - me.fx) * me.t, py = me.fy + (ny - me.fy) * me.t;
+    meG.position.set(wx(px), ground(me.fx, me.fy) + (ground(nx, ny) - ground(me.fx, me.fy)) * me.t + Math.abs(Math.sin(now * 16)) * bobAmp, wz(py));
+    meG.rotation.y = Math.atan2(nx - me.fx, ny - me.fy);
+    if (me.t === 1) { sfx.step(); me.x = me.fx = nx; me.y = me.fy = ny; me.t = 0; me.path.shift();
+      if (!me.path.length) { const f = me.then; me.then = null; if (f) f(); refreshAct(); } }
+  } else meG.position.set(wx(me.x), ground(me.x, me.y), wz(me.y));
+  spots.forEach((g, i) => {                                    // しぼりこみ中は該当だけ弾ませ、ほかは縮める
+    const on = current && g.userData.info.dept === current, k = !current ? 1 : on ? 1 : .45;
+    if (intro.on) { const p = popIn(intro.t, i); g.scale.set(p, p, p); } else g.scale.lerp(want.set(k, k, k), .2); g.position.y = g.userData.base + (on ? Math.abs(Math.sin(now * 4)) * .18 : 0);
+  });
+  { const k = Math.max(1, cam.dist / 20) ** .5; labels.forEach(l => l.scale.set(l.userData.size[0] * k, l.userData.size[1] * k, 1)); }
+  boat.position.y = .12 + Math.sin(now * 1.6) * .03; boat.rotation.z = Math.sin(now * 1.2) * .05;
+  // カメラ：近いときは自分を追い、引くと島全体を映す
+  const far = THREE.MathUtils.smoothstep(cam.dist, 30, 70);
+  want.copy(meG.position).lerp(center, far); cam.target.lerp(want, .12);
+  const el = THREE.MathUtils.lerp(.82, 1.12, far);          // 引くほど真上寄りに
+  camera.position.set(cam.target.x + Math.sin(cam.az) * Math.cos(el) * cam.dist, cam.target.y + Math.sin(el) * cam.dist, cam.target.z + Math.cos(cam.az) * Math.cos(el) * cam.dist);
+  camera.lookAt(cam.target.x, cam.target.y + .4, cam.target.z);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+};
+if (!new URLSearchParams(location.search).has('plain')) useKit().then(() => { window.__kit = 'ready'; }).catch(e => { window.__kit = 'failed'; console.warn('素材の読み込みに失敗。手作りの形のまま表示します', e); });
+refreshAct(); frame();
+window.__island = { me, cam, spots, visit, intro };
+</script>
+</body>
+</html>
